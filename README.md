@@ -47,6 +47,6 @@ Configure your channel ids/roles
 
 **9)** To launch the bot open a CMD window and type: bot.py
 
-pip install -U git+https://github.com/dermasmid/scrapetube
+![Screenshot_9](https://github.com/Sir-lygophobia/Project-L/assets/143434121/e4f79345-3d6a-4bac-ab4a-e9ad10e81af3)
 
 *Type: /help in discord to display all of the commands*
