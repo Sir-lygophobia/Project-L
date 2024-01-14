@@ -3,7 +3,7 @@
 **List Of Features**
 *Moderation, ModMail, Music, Auto Roles, Sticky Messages,  Invite Tracker, Giveawy System, Rock Paper Scissors, Casino Games, Logs, and much more to come!* 
 
-*Join the community visit* https://www.lygosland.com
+*Join the community visit:* https://www.lygosland.com
 
 ![IMG_0404](https://github.com/Sir-lygophobia/Project-L/assets/143434121/db4aee20-92e6-4c81-ae1b-247bd9b78dd4)
 
