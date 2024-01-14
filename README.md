@@ -1,5 +1,4 @@
 # Project-L
-/help - Displays all commands
 
 *Join the community visit* https://www.lygosland.com
 
@@ -24,3 +23,5 @@ Configure your channel ids/roles
 **8)** Type "pip install -U git+https://github.com/dermasmid/scrapetube"
 
 **9)** To launch the bot open a CMD window and type: bot.py
+
+*Type: /help to display all of the commands*
