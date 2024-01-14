@@ -1,19 +1,17 @@
 # Project-L
 /help - Displays all commands
+Join the community at https//www.lygosland.com 
 
 Instructions:
-Unpack the .zip folder
-
-Open config.json and change these:
+1)Download the bot to your pc
+2)Use 7zip to unpack the .zip folder 7 zip can be download free here:https://www.7-zip.org/download.html
+3)Open config.json and change these:
 token = your bot token
 client_id = your bot client id
 Configure your channel ids/roles
-
-To host on own device:
-Then install python: Latest version(https://www.python.org/downloads/) - Click the "Add to PATH" option on installer!
-Then install git: https://git-scm.com/downloads
-Then open CMD in windows, and do "cd pathtofolder".
-Then do "pip install -r requirements.txt"
-Then do "pip install -U git+https://github.com/dermasmid/scrapetube"
-Then do "python bot.py" and the bot will be running.
-
+4)Install python: Latest version(https://www.python.org/downloads/) - Click the "Add to PATH" option on installer!
+5)Install git: https://git-scm.com/downloads
+6)Open CMD in windows, and type "cd pathtofolder". An example if saved on desktop is: cd C:\Users\user\Desktop
+7)Type "pip install -r requirements.txt" 
+8)Type "pip install -U git+https://github.com/dermasmid/scrapetube"
+9)To launch the bot open a CMD window and type: python bot.py
