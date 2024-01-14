@@ -5,9 +5,10 @@
 
 *Join the community visit* https://www.lygosland.com
 
-https://cdn.discordapp.com/attachments/1102381228340023420/1195995831959031858/IMG_0404.png?ex=65b604ea&is=65a38fea&hm=d0aeb0563daed08510ace2ae320fbdfa1fc5779644774ea6f0e68c2a2ccecf2c&
+![IMG_0404](https://github.com/Sir-lygophobia/Project-L/assets/143434121/db4aee20-92e6-4c81-ae1b-247bd9b78dd4)
 
 **Instructions:**
+
 **1)** Download the bot to your pc
 
 **2)** Use 7zip to unpack the .zip folder 7 zip can be download free here:https://www.7-zip.org/download.html
