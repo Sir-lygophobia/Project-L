@@ -11,6 +11,8 @@
 
 **1)** Download the bot to your pc
 
+![Screenshot_2](https://github.com/Sir-lygophobia/Project-L/assets/143434121/a0065b69-f250-487a-bb9b-4513be044f1f)
+
 **2)** Use 7zip to unpack the .zip folder 7 zip can be download free here:https://www.7-zip.org/download.html
 
 **3)** Open config.json and change these:
