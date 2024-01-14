@@ -1,6 +1,6 @@
 # Project-L
 /help - Displays all commands
-Join the community at https//www.lygosland.com 
+Join the community at https://www.lygosland.com 
 
 Instructions:
 1)Download the bot to your pc
