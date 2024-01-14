@@ -1,5 +1,7 @@
 # Project-L
 
+![Screenshot_10](https://github.com/Sir-lygophobia/Project-L/assets/143434121/324c82ca-08ea-4a29-93a8-227e98254a2b)
+
 **List Of Features**
 *Moderation, ModMail, Music, Auto Roles, Sticky Messages,  Invite Tracker, Giveawy System, Rock Paper Scissors, Casino Games, Logs, and much more to come!* 
 
