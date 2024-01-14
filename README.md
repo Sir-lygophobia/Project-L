@@ -1,5 +1,8 @@
 # Project-L
 
+**List Of Features**
+*Moderation, ModMail, Music, Auto Roles, Sticky Messages,  Invite Tracker, Giveawy System, Rock Paper Scissors, Casino Games, Logs, and much more to come!* 
+
 *Join the community visit* https://www.lygosland.com
 
 **Instructions:**
