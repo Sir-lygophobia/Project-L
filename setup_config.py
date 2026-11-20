@@ -210,6 +210,7 @@ def flatten_config(config: Mapping[str, Any], role_ids: list[int]) -> dict[str, 
         )
     }
     values["kickMemberFunction"] = bool(config.get("kickMemberFunction", False))
+    values["logMessageContent"] = bool(config.get("logMessageContent", False))
     for flat_key, path in NESTED_ID_FIELDS.items():
         values[flat_key] = _mapping_value(config, path)
     friends = config.get("friendTwitch", [])
@@ -279,6 +280,7 @@ def build_configuration(
                 errors.append(str(exc))
 
     config["kickMemberFunction"] = bool(values.get("kickMemberFunction", False))
+    config["logMessageContent"] = bool(values.get("logMessageContent", False))
 
     try:
         config["friendTwitch"] = parse_twitch_friends_text(
@@ -420,9 +422,39 @@ def configuration_status(
             )
         except (TypeError, ValueError):
             provisioning_version = 0
-        if provisioning_version < AUTOMATIC_SETUP_VERSION:
+        required_resource_ids = [
+            config.get("welcome"),
+            config.get("invitechannel"),
+            config.get("verified"),
+            config.get("transcripts"),
+            config.get("logs"),
+            config.get("modmail"),
+            config.get("voicecategory"),
+            config.get("streamRole"),
+            *(config.get("tickets") or {}).values(),
+            *(config.get("serverStatChannelIds") or {}).values(),
+            *(config.get("logChannelIds") or {}).values(),
+        ]
+        if isinstance(managed, Mapping):
+            required_resource_ids.extend(
+                managed.get(key)
+                for key in (
+                    "communityCategory",
+                    "staffCategory",
+                    "statsCategory",
+                    "panelsChannel",
+                )
+            )
+        else:
+            required_resource_ids.append(0)
+        resources_incomplete = any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in required_resource_ids
+        )
+        if provisioning_version < AUTOMATIC_SETUP_VERSION or resources_incomplete:
             reasons.append(
-                "automatic Discord channel/category setup has not been completed"
+                "automatic Discord roles, channels, categories, and panels setup "
+                "has not been completed"
             )
     except ConfigError as exc:
         reasons.append(str(exc))

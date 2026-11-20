@@ -23,6 +23,7 @@ Data/config.json
 Data/roles.json
 Data/bot-runtime*.log
 Transcripts/
+Backups/
 date.json
 *.log
 logs/

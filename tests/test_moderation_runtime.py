@@ -4,10 +4,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from Commands.moderation import (
+    MAX_PURGE_MESSAGES,
+    PURGE_CONFIRM_THRESHOLD,
     WARNINGS_DESCRIPTION_LIMIT,
     ModsCommand,
     build_warning_pages,
     find_muted_role,
+    purge_requires_confirmation,
     respond_to_interaction,
 )
 
@@ -38,6 +41,11 @@ def make_interaction(*, user_id=1, guild=None, response_done=False):
 
 
 class ModerationHelperTests(unittest.TestCase):
+    def test_large_purges_require_confirmation_and_have_a_safe_cap(self):
+        self.assertFalse(purge_requires_confirmation(PURGE_CONFIRM_THRESHOLD - 1))
+        self.assertTrue(purge_requires_confirmation(PURGE_CONFIRM_THRESHOLD))
+        self.assertEqual(MAX_PURGE_MESSAGES, 1000)
+
     def test_warning_pages_stay_under_discord_description_limit(self):
         records = [("x" * 250, index) for index in range(1, 80)]
 
@@ -45,9 +53,7 @@ class ModerationHelperTests(unittest.TestCase):
 
         self.assertGreater(len(pages), 1)
         self.assertTrue(pages)
-        self.assertTrue(
-            all(len(page) <= WARNINGS_DESCRIPTION_LIMIT for page in pages)
-        )
+        self.assertTrue(all(len(page) <= WARNINGS_DESCRIPTION_LIMIT for page in pages))
         for index in range(1, 80):
             self.assertIn(f"**{index}.**", "".join(pages))
 
@@ -57,9 +63,7 @@ class ModerationHelperTests(unittest.TestCase):
         pages = build_warning_pages([(reason, 12)])
 
         self.assertEqual(len(pages), 2)
-        self.assertTrue(
-            all(len(page) <= WARNINGS_DESCRIPTION_LIMIT for page in pages)
-        )
+        self.assertTrue(all(len(page) <= WARNINGS_DESCRIPTION_LIMIT for page in pages))
         self.assertEqual("".join(pages), f"**1.** {reason} - <@12>")
 
     def test_muted_role_lookup_is_case_insensitive(self):
@@ -85,9 +89,7 @@ class ModerationRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         deferred = make_interaction(response_done=True)
         await respond_to_interaction(deferred, "follow-up", ephemeral=True)
-        deferred.followup.send.assert_awaited_once_with(
-            "follow-up", ephemeral=True
-        )
+        deferred.followup.send.assert_awaited_once_with("follow-up", ephemeral=True)
 
     async def test_warnings_database_failure_finishes_deferred_interaction(self):
         guild = SimpleNamespace()
@@ -133,9 +135,7 @@ class ModerationRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         interaction.response.defer.assert_awaited_once_with()
         sent = interaction.followup.send.await_args.kwargs
-        self.assertLessEqual(
-            len(sent["embed"].description), WARNINGS_DESCRIPTION_LIMIT
-        )
+        self.assertLessEqual(len(sent["embed"].description), WARNINGS_DESCRIPTION_LIMIT)
         view = sent["view"]
         self.assertTrue(view.previous.disabled)
         self.assertFalse(view.next.disabled)
@@ -184,9 +184,7 @@ class ModerationRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         removed_roles = member.remove_roles.await_args.args
         self.assertEqual(removed_roles, (role, duplicate))
-        interaction.followup.send.assert_awaited_once_with(
-            "<@2> has been unmuted."
-        )
+        interaction.followup.send.assert_awaited_once_with("<@2> has been unmuted.")
 
     async def test_mute_configures_role_before_assigning_it(self):
         role = FakeRole()
@@ -214,9 +212,7 @@ class ModerationRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(permissions["send_messages_in_threads"], False)
         self.assertIs(permissions["add_reactions"], False)
         member.add_roles.assert_awaited_once()
-        interaction.followup.send.assert_awaited_once_with(
-            "<@2> has been muted."
-        )
+        interaction.followup.send.assert_awaited_once_with("<@2> has been muted.")
 
     async def test_mute_reports_partial_channel_permission_failure(self):
         role = FakeRole()

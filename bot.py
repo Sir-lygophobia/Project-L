@@ -12,6 +12,7 @@ import requests
 from collections import deque
 from easy_pil import Editor, load_image_async, Font
 from Commands.members import mAddBtn
+from Commands.panels import ensure_automatic_panels
 from config_loader import (
     BASE_DIR,
     ConfigError,
@@ -22,6 +23,12 @@ from config_loader import (
 )
 from youtube_notifications import fetch_recent_youtube_content
 from giveaway_utils import chunk_display_values, ended_description, parse_winner_count
+from command_errors import app_command_error_message
+from twitch_notifications import (
+    TwitchTokenCache,
+    load_notified_stream_ids,
+    remember_notified_stream,
+)
 import traceback
 
 
@@ -53,6 +60,7 @@ friend = config["friendTwitch"]
 previous = set()
 notified = set()
 notified_order = deque()
+twitch_token_cache = TwitchTokenCache()
 youtube_cache_primed = False
 youtube_last_error = None
 youtube_last_error_time = 0.0
@@ -81,26 +89,33 @@ def mark_youtube_success():
     youtube_last_error = None
     youtube_last_error_time = 0.0
 
+
 intents = discord.Intents.default()
 intents.members = True
 intents.presences = True
 intents.message_content = True
 
-client = commands.Bot(command_prefix="!", intents=intents, help_command=None, status=discord.Status.online,
-                      activity=discord.Activity(type=discord.ActivityType.playing, name="/help"), application_id=botclientid or None)
+client = commands.Bot(
+    command_prefix="!",
+    intents=intents,
+    help_command=None,
+    status=discord.Status.online,
+    activity=discord.Activity(type=discord.ActivityType.playing, name="/help"),
+    application_id=botclientid or None,
+)
 
 
-async def sticky_ready(id, content,limit):
+async def sticky_ready(id, content, limit):
     @tasks.loop(seconds=12)
     async def stickyloop(channel: discord.TextChannel, sticky_object: dict):
-        message, message_limit = sticky_object['content'], sticky_object['messageLimit']
-            # print(message)
+        message, message_limit = sticky_object["content"], sticky_object["messageLimit"]
+        # print(message)
         if channel.id not in client.sticky:
-            print('channel not found')
+            print("channel not found")
             stickyloop.stop()
             return
-        elif client.sticky[channel.id]['content'] != message:
-            print('stopping loop')
+        elif client.sticky[channel.id]["content"] != message:
+            print("stopping loop")
             stickyloop.stop()
             return
 
@@ -113,10 +128,8 @@ async def sticky_ready(id, content,limit):
                 await channel.send(f"{message}")
         except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
             print(f"[!] Sticky update failed for channel {channel.id}: {exc}")
-    sticky_object = {
-            'content': content,
-            'messageLimit': limit
-        }
+
+    sticky_object = {"content": content, "messageLimit": limit}
     # print(sticky_object)
     client.sticky[id] = sticky_object
     c = client.get_channel(id)
@@ -142,13 +155,15 @@ async def sticky_ready(id, content,limit):
     stickyloop.start(c, sticky_object)
     return None
 
-channelName={
-            'totalMembers':'👥〢Members',
-            'totalBots':'🤖〢Bots',
-            'totalBoosts':'🚀〢ʙᴏᴏsᴛs',
-            'onlineMembers':'🟢〢Online',
-            'offlineMembers':'🔴〢Offline',
-        }
+
+channelName = {
+    "totalMembers": "👥〢Members",
+    "totalBots": "🤖〢Bots",
+    "totalBoosts": "🚀〢ʙᴏᴏsᴛs",
+    "onlineMembers": "🟢〢Online",
+    "offlineMembers": "🔴〢Offline",
+}
+
 
 @tasks.loop(minutes=6)  # Set the interval to 5 minutes
 async def update_stats():
@@ -161,7 +176,9 @@ async def update_stats():
         totalMembers = guild.member_count
         totalBoosts = guild.premium_subscription_count
         totalBots = sum(1 for member in guild.members if member.bot)
-        onlineMembers = sum(1 for member in guild.members if member.status == discord.Status.online)
+        onlineMembers = sum(
+            1 for member in guild.members if member.status == discord.Status.online
+        )
         offlineMembers = totalMembers - onlineMembers
 
         # print(totalMembers)
@@ -171,7 +188,6 @@ async def update_stats():
         # print(offlineMembers)
         # print(serverStats.items())
 
-
         for stat_key, channel_id in serverStats.items():
             if not channel_id:
                 continue
@@ -180,7 +196,9 @@ async def update_stats():
 
                 if channel:
                     stat_value = locals()[stat_key]
-                    channel_name = channelName.get(stat_key, "Unknown")  # Get the corresponding channel name
+                    channel_name = channelName.get(
+                        stat_key, "Unknown"
+                    )  # Get the corresponding channel name
                     # print('before the end')
                     # print(f'{channel_name} {stat_value}')
                     await channel.edit(name=f"{channel_name} {stat_value}")
@@ -208,9 +226,11 @@ def read_last_date():
     write_last_date(initial_date)
     return initial_date
 
+
 def write_last_date(last_date):
     with open(BASE_DIR / "date.json", "w", encoding="utf-8") as file:
         json.dump({"lastDate": last_date.isoformat()}, file)
+
 
 @tasks.loop(minutes=59)
 async def check_members_task():
@@ -246,13 +266,16 @@ async def check_members_task():
                     await member.kick(reason="Inactive and not verified")
                     await asyncio.sleep(30)
             except discord.Forbidden:
-                print(f"Skipping kick for {member} (role hierarchy or permission denied)")
+                print(
+                    f"Skipping kick for {member} (role hierarchy or permission denied)"
+                )
             except (discord.HTTPException, OSError) as exc:
                 print(f"Could not process member {member}: {exc}")
         write_last_date(current_time)
     except Exception as exc:
         # Keep the recurring loop alive if Discord or the watermark file fails.
         print(f"[!] Member cleanup check failed; will retry later: {exc}")
+
 
 # @client.event
 # async def on_guild_channel_update(before, after):
@@ -261,11 +284,16 @@ async def check_members_task():
 async def on_error(event, *args, **kwargs):
     error_message = traceback.format_exc()
     print(f"Error in event {event}: {error_message}")
+
+
 @client.event
 async def on_ready():
 
-    print(f"[!] {time.strftime('%Y-%m-%d - %H:%M')}: Initiating bot. Please wait...",
-          end='', flush=True)
+    print(
+        f"[!] {time.strftime('%Y-%m-%d - %H:%M')}: Initiating bot. Please wait...",
+        end="",
+        flush=True,
+    )
     # while not youtubeloop.is_running() or not twitchloop.is_running() or not checker.is_running():
     #     await asyncio.sleep(1)
 
@@ -303,6 +331,27 @@ async def on_ready():
                 print(f"[!] Could not restore a role button: {exc}")
         client.persistent_state_loaded = True
 
+    if not client.twitch_state_loaded:
+        try:
+            retained_streams = await asyncio.to_thread(
+                load_notified_stream_ids,
+                BASE_DIR / "Data" / "users.db",
+            )
+            notified.update(retained_streams)
+            notified_order.extend(retained_streams)
+            print(f"[OK] Restored {len(retained_streams)} Twitch notification ID(s).")
+        except (OSError, sqlite3.Error) as exc:
+            print(f"[!] Could not restore Twitch notification state: {exc}")
+        client.twitch_state_loaded = True
+
+    if not client.panels_reconciled:
+        panel_report = await ensure_automatic_panels(client)
+        if panel_report.created:
+            print("[OK] Installed panels: " + ", ".join(panel_report.created))
+        if panel_report.failed:
+            print("[!] Panel setup needs attention: " + "; ".join(panel_report.failed))
+        client.panels_reconciled = not panel_report.failed
+
     if guildId and any(serverStats.values()) and not update_stats.is_running():
         update_stats.start()
 
@@ -312,11 +361,7 @@ async def on_ready():
     if ytchannel and youtubeid and not youtubeloop.is_running():
         youtubeloop.start()
 
-    twitch_enabled = (
-        clientid
-        and clientsecret
-        and ((twchannel and twitchid) or friend)
-    )
+    twitch_enabled = clientid and clientsecret and ((twchannel and twitchid) or friend)
     if twitch_enabled and not twitchloop.is_running():
         twitchloop.start()
 
@@ -360,8 +405,13 @@ async def _legacy_checker():
             return
 
         prize = message.embeds[0].title
-        winners = int(message.embeds[0].description.split(
-            "Winners:** ")[1].split("**Ends")[0].replace("\n", "").replace(r"\n", ""))
+        winners = int(
+            message.embeds[0]
+            .description.split("Winners:** ")[1]
+            .split("**Ends")[0]
+            .replace("\n", "")
+            .replace(r"\n", "")
+        )
 
         choices = []
         for r in message.reactions:
@@ -382,11 +432,12 @@ async def _legacy_checker():
         for winner in winnerlist:
             winnerz.append(winner.mention)
 
-        winnerz = str(winnerz).replace(
-            "[", "").replace("]", "").replace("'", "")
+        winnerz = str(winnerz).replace("[", "").replace("]", "").replace("'", "")
 
         ember = message.embeds[0]
-        ember.description = f'{message.embeds[0].description.split("React with")[0]}Giveaway ended.'
+        ember.description = (
+            f"{message.embeds[0].description.split('React with')[0]}Giveaway ended."
+        )
         await message.edit(embed=ember)
 
         emb = discord.Embed(title=prize, colour=discord.Colour.green())
@@ -468,13 +519,20 @@ async def checker():
                 chunk_display_values([winner.mention for winner in winner_list])
             ):
                 field_name = "Winners" if index == 0 else "Winners (continued)"
-                result_embed.add_field(name=field_name, value=winner_mentions, inline=False)
+                result_embed.add_field(
+                    name=field_name, value=winner_mentions, inline=False
+                )
             result_embed.set_footer(text="Giveaway ended")
             await message.reply(embed=result_embed)
             update_giveaway_record(giveaway_id)
         except discord.NotFound:
             update_giveaway_record(giveaway_id, delete=True)
-        except (discord.Forbidden, discord.HTTPException, sqlite3.Error, ValueError) as exc:
+        except (
+            discord.Forbidden,
+            discord.HTTPException,
+            sqlite3.Error,
+            ValueError,
+        ) as exc:
             print(f"[!] Could not finalize giveaway {giveaway_id}; will retry: {exc}")
         except Exception as exc:
             print(f"[!] Unexpected giveaway error for {giveaway_id}; will retry: {exc}")
@@ -482,24 +540,7 @@ async def checker():
 
 def fetch_twitch_streams():
     """Return configured live streams using bounded blocking HTTP calls."""
-    body = {
-        "client_id": clientid,
-        "client_secret": clientsecret,
-        "grant_type": "client_credentials",
-    }
     with requests.Session() as session:
-        response = session.post(
-            "https://id.twitch.tv/oauth2/token",
-            data=body,
-            timeout=15,
-        )
-        response.raise_for_status()
-        access_token = response.json()["access_token"]
-        headers = {
-            "Client-ID": clientid,
-            "Authorization": f"Bearer {access_token}",
-        }
-
         configured_channels = []
         if twchannel and twitchid:
             configured_channels.append((twitchid, twchannel, True))
@@ -509,21 +550,41 @@ def fetch_twitch_streams():
             if item.get("friendChannelId") and item.get("friendChannel")
         )
 
-        live_streams = []
-        for discord_channel_id, twitch_name, is_primary in configured_channels:
-            response = session.get(
-                "https://api.twitch.tv/helix/streams",
-                params={"user_login": twitch_name},
-                headers=headers,
+        for authentication_attempt in range(2):
+            access_token = twitch_token_cache.get_access_token(
+                session,
+                client_id=clientid,
+                client_secret=clientsecret,
                 timeout=15,
             )
-            response.raise_for_status()
-            streams = response.json().get("data", [])
-            if streams:
-                live_streams.append(
-                    (discord_channel_id, twitch_name, is_primary, streams[0])
+            headers = {
+                "Client-ID": clientid,
+                "Authorization": f"Bearer {access_token}",
+            }
+            retry_authentication = False
+            live_streams = []
+            for discord_channel_id, twitch_name, is_primary in configured_channels:
+                response = session.get(
+                    "https://api.twitch.tv/helix/streams",
+                    params={"user_login": twitch_name},
+                    headers=headers,
+                    timeout=15,
                 )
-        return live_streams
+                if response.status_code == 401:
+                    twitch_token_cache.invalidate()
+                    if authentication_attempt == 0:
+                        retry_authentication = True
+                        break
+                response.raise_for_status()
+                streams = response.json().get("data", [])
+                if streams:
+                    live_streams.append(
+                        (discord_channel_id, twitch_name, is_primary, streams[0])
+                    )
+            if retry_authentication:
+                continue
+            return live_streams
+    return []
 
 
 @tasks.loop(seconds=60)
@@ -537,7 +598,9 @@ async def twitchloop():
     for discord_channel_id, twitch_name, is_primary, stream_data in streams:
         channel = client.get_channel(discord_channel_id)
         if channel is None:
-            print(f"[!] Twitch notification channel {discord_channel_id} is unavailable.")
+            print(
+                f"[!] Twitch notification channel {discord_channel_id} is unavailable."
+            )
             continue
 
         stream_id = stream_data.get("id")
@@ -555,7 +618,18 @@ async def twitchloop():
         if game_name:
             message += f"\nPlaying: {game_name}"
         try:
-            await channel.send(message)
+            allowed_roles = (
+                [discord.Object(id=streamRole)] if is_primary and streamRole else []
+            )
+            await channel.send(
+                message,
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=False,
+                    users=False,
+                    roles=allowed_roles,
+                    replied_user=False,
+                ),
+            )
         except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
             print(
                 f"[!] Twitch notification send failed for {twitch_name}; "
@@ -564,6 +638,14 @@ async def twitchloop():
             continue
         notified.add(stream_id)
         notified_order.append(stream_id)
+        try:
+            await asyncio.to_thread(
+                remember_notified_stream,
+                BASE_DIR / "Data" / "users.db",
+                stream_id,
+            )
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            print(f"[!] Could not persist Twitch stream {stream_id}: {exc}")
         while len(notified_order) > 5000:
             notified.discard(notified_order.popleft())
 
@@ -597,8 +679,9 @@ async def youtubeloop():
                 video_id = result.get("videoId")
                 if video_id and video_id not in previous:
                     await channel.send(
-                        f"**{channel.guild.default_role} New Upload**\n"
-                        f"https://www.youtube.com/watch?v={video_id}"
+                        "**New YouTube upload**\n"
+                        f"https://www.youtube.com/watch?v={video_id}",
+                        allowed_mentions=discord.AllowedMentions.none(),
                     )
                     previous.add(video_id)
     except Exception as exc:
@@ -622,25 +705,16 @@ async def on_member_join(member: discord.Member):
         print(f"[!] Welcome channel {welcomeid} is unavailable.")
         return
     embed = discord.Embed(
-        title="**╭━━━━━✦WELCOME✦━━━━━━━━━━━━━━━━➧**", colour=client.colour
+        title=f"👋 Welcome to {member.guild.name}!",
+        description=f"Hello {member.mention}. We are glad you are here.",
+        colour=client.colour,
     )
+    embed.set_thumbnail(url=member.display_avatar.url)
     embed.add_field(
-        name="\u200b",
-        value=f"<a:green_crown_sparkle:1105696367667597372> Hello {member} <a:green_crown_sparkle:1105696367667597372>",
-        inline=False,
-    )
-    embed.add_field(
-        name="\u200b",
-        value=f"<a:green_online:1105696576350978111> Welcome to **{member.guild.name}** <a:green_online:1105696576350978111>",
-        inline=False,
-    )
-    embed.add_field(
-        name="<a:green_heartstatic:1108584890305351731> Your presence is a valuable addition <a:green_heartstatic:1108584890305351731>",
+        name="Getting started",
         value=(
-            "**━━━━━━━━━━━✦INFO✦━━━━━━━━━━━━━━━━➧**\n"
             "Please read this server's rules and use its ticket panel if you need help.\n"
             "Use the self-role and verification panels to personalize your profile.\n"
-            "**╰━━━━━━✦ENJOY✦━━━━━━━━━━━━━━━━━━➧**"
         ),
         inline=False,
     )
@@ -654,8 +728,12 @@ async def on_member_join(member: discord.Member):
         poppins_small = Font.poppins(size=50, variant="light")
         background.paste(profile, (390, 50))
         background.ellipse((390, 50), 250, 250, outline="black", stroke_width=4)
-        background.text((525, 300), "WELCOME !", color="white", font=poppins, align="center")
-        background.text((525, 360), member.name, color="white", font=poppins_small, align="center")
+        background.text(
+            (525, 300), "WELCOME !", color="white", font=poppins, align="center"
+        )
+        background.text(
+            (525, 360), member.name, color="white", font=poppins_small, align="center"
+        )
 
         welcome_file = discord.File(fp=background.image_bytes, filename="wlcbg.jpg")
         embed.set_image(url="attachment://wlcbg.jpg")
@@ -669,17 +747,9 @@ async def on_member_join(member: discord.Member):
         await welcome.send(**send_options)
     except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
         print(f"[!] Could not send welcome message for member {member.id}: {exc}")
-
-"""
-**╭━━━━━✦WELCOME✦━━━━━━━━━━━━━━━━➧**
-> :green_crown_sparkle:Hello <@1138150310435627069> :green_crown_sparkle:
-> 📢Welcome to **Lygo's Land** 📢
-> ❤️ Your presence is a valuable addition :green_heartstatic:
-**━━━━━━━━━━━✦INFO✦━━━━━━━━━━━━━━━━➧**
-> 👉🏻 Read our Rules here <#1042619540774846605>
-> :green_planet:  For Help, open a <#1105676532095127643>
-> :green_planet:  Customize Your Profile <#1105673962647715951>
-**╰━━━━━━✦ENJOY✦━━━━━━━━━━━━━━━━━━➧**"""
+    finally:
+        if welcome_file is not None:
+            welcome_file.close()
 
 
 def initialize_databases():
@@ -781,6 +851,29 @@ async def configured_guild_only(interaction: discord.Interaction):
 client.tree.interaction_check = configured_guild_only
 
 
+async def handle_app_command_error(
+    interaction: discord.Interaction,
+    error: discord.app_commands.AppCommandError,
+):
+    """Give every failed slash command a safe response and retain diagnostics."""
+    original = getattr(error, "original", error)
+    print(
+        f"[!] Application command error ({type(original).__name__}): {original}",
+        file=sys.stderr,
+    )
+    message = app_command_error_message(error)
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
+        print(f"[!] Could not deliver application-command error response: {exc}")
+
+
+client.tree.on_error = handle_app_command_error
+
+
 @client.event
 async def setup_hook():
     initialize_databases()
@@ -801,9 +894,10 @@ async def loadcogs():
 def configure_client_state():
     client.sticky = {}
     client.persistent_state_loaded = False
+    client.twitch_state_loaded = False
+    client.panels_reconciled = False
     client.configured_guild_id = guildId
     client.colour = discord.Colour.from_rgb(101, 255, 0)
-    client.greenline = "https://i.ibb.co/BVTKyXb/greenline.gif"
     client.modmailid = modmailid
 
 

@@ -1,13 +1,18 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import discord
 
 from Commands.panels import (
+    ensure_automatic_panels,
     is_self_role_panel_message,
     normalized_panel_title,
+    panel_kind_for_message,
+    reaction_role_options,
     repair_self_role_panel_images,
+    ticket_embed,
+    verification_embed,
 )
 
 
@@ -25,6 +30,41 @@ class PanelHelperTests(unittest.TestCase):
         self.assertFalse(is_self_role_panel_message(message, 11))
         message.components = []
         self.assertFalse(is_self_role_panel_message(message, 10))
+
+    def test_managed_panels_are_identified_by_stable_components(self):
+        row = SimpleNamespace(
+            children=[
+                SimpleNamespace(custom_id="ticket_help"),
+                SimpleNamespace(custom_id="ticket_suggestions"),
+                SimpleNamespace(custom_id="ticket_report"),
+            ]
+        )
+        message = SimpleNamespace(author=SimpleNamespace(id=10), components=[row])
+        self.assertEqual(panel_kind_for_message(message, 10), "tickets")
+        self.assertIsNone(panel_kind_for_message(message, 11))
+
+    def test_standard_panel_embeds_have_no_external_image_dependencies(self):
+        guild = SimpleNamespace(name="Example Server")
+        for embed in (
+            verification_embed(guild, discord.Colour.green()),
+            ticket_embed(discord.Colour.green()),
+        ):
+            self.assertFalse(embed.image.url)
+            self.assertNotIn("Lygo", str(embed.to_dict()))
+
+    def test_default_everyone_role_is_never_offered_for_self_assignment(self):
+        everyone = SimpleNamespace(
+            id=7,
+            name="@everyone",
+            managed=False,
+            is_default=lambda: True,
+        )
+        guild = SimpleNamespace(
+            id=7,
+            me=None,
+            get_role=lambda _role_id: everyone,
+        )
+        self.assertEqual(reaction_role_options(guild, [7]), [])
 
 
 class PanelRepairTests(unittest.IsolatedAsyncioTestCase):
@@ -102,6 +142,63 @@ class PanelRepairTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual((repaired, failures), (0, []))
         message.edit.assert_not_awaited()
+
+
+class AutomaticPanelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_panel_installation_is_idempotent(self):
+        bot_user = SimpleNamespace(id=42)
+
+        class FakeChannel:
+            def __init__(self):
+                self.messages = []
+
+            def history(self, **_kwargs):
+                async def iterate():
+                    for item in reversed(self.messages):
+                        yield item
+
+                return iterate()
+
+            async def send(self, *, embed, view, **_kwargs):
+                message = SimpleNamespace(
+                    author=bot_user,
+                    embeds=[embed],
+                    components=[SimpleNamespace(children=view.children)],
+                )
+                self.messages.append(message)
+                return message
+
+        channel = FakeChannel()
+        guild = SimpleNamespace(
+            name="Test Server",
+            me=None,
+            get_channel=lambda channel_id: channel if channel_id == 99 else None,
+        )
+        client = SimpleNamespace(
+            user=bot_user,
+            colour=discord.Colour.green(),
+            get_guild=lambda guild_id: guild if guild_id == 7 else None,
+            get_channel=lambda _channel_id: None,
+        )
+        config = {
+            "guildId": 7,
+            "managedResources": {"panelsChannel": 99},
+        }
+        with (
+            patch("Commands.panels.load_config", return_value=config),
+            patch("Commands.panels.load_role_ids", return_value=[]),
+        ):
+            first = await ensure_automatic_panels(client)
+            second = await ensure_automatic_panels(client)
+
+        self.assertEqual(first.created, ["verification", "private_voice", "tickets"])
+        self.assertEqual(first.failed, [])
+        self.assertEqual(second.created, [])
+        self.assertEqual(
+            second.existing,
+            ["verification", "private_voice", "tickets"],
+        )
+        self.assertEqual(len(channel.messages), 3)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$NoGui,
-    [switch]$SkipConfiguration
+    [switch]$SkipConfiguration,
+    [switch]$SkipSystemDependencies
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +19,104 @@ function Assert-NativeSuccess {
     if ($ExitCode -ne 0) {
         throw "$Operation failed with exit code $ExitCode."
     }
+}
+
+function Update-ProcessPath {
+    $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $pathParts = @($machinePath, $userPath, $env:Path) | Where-Object { $_ }
+    $env:Path = $pathParts -join ";"
+}
+
+function Install-SystemPackage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DisplayName,
+        [Parameter(Mandatory = $true)]
+        [string]$WingetId,
+        [Parameter(Mandatory = $true)]
+        [string]$ChocolateyId,
+        [switch]$Required
+    )
+
+    if ($SkipSystemDependencies) {
+        if ($Required) {
+            throw "$DisplayName is required but automatic system dependency installation was skipped."
+        }
+        Write-Warning "$DisplayName is missing and automatic installation was skipped."
+        return $false
+    }
+
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "Installing $DisplayName with Windows Package Manager..."
+        & winget install `
+            --id $WingetId `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements `
+            --disable-interactivity
+        if ($LASTEXITCODE -eq 0) {
+            Update-ProcessPath
+            return $true
+        }
+        Write-Warning "Windows Package Manager could not install $DisplayName (exit $LASTEXITCODE)."
+    }
+
+    if (Get-Command choco -ErrorAction SilentlyContinue) {
+        Write-Host "Installing $DisplayName with Chocolatey..."
+        & choco install $ChocolateyId --yes --no-progress
+        if ($LASTEXITCODE -eq 0) {
+            Update-ProcessPath
+            return $true
+        }
+        Write-Warning "Chocolatey could not install $DisplayName (exit $LASTEXITCODE)."
+    }
+
+    if ($Required) {
+        throw "Could not install $DisplayName. Install it manually, reopen PowerShell, and run setup.ps1 again."
+    }
+    Write-Warning "Could not install $DisplayName automatically. The related optional feature may be unavailable."
+    return $false
+}
+
+function Find-Python311 {
+    $launcher = Get-Command py -ErrorAction SilentlyContinue
+    if ($launcher) {
+        & $launcher.Source -3.11 -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)"
+        if ($LASTEXITCODE -eq 0) {
+            return [pscustomobject]@{
+                Command = $launcher.Source
+                Arguments = @("-3.11")
+            }
+        }
+    }
+
+    $candidates = @()
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if ($pythonCommand) {
+        $candidates += $pythonCommand.Source
+    }
+    if ($env:LOCALAPPDATA) {
+        $candidates += Join-Path $env:LOCALAPPDATA "Programs\Python\Python311\python.exe"
+    }
+    if ($env:ProgramFiles) {
+        $candidates += Join-Path $env:ProgramFiles "Python311\python.exe"
+    }
+
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            continue
+        }
+        & $candidate -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)"
+        if ($LASTEXITCODE -eq 0) {
+            return [pscustomobject]@{
+                Command = $candidate
+                Arguments = @()
+            }
+        }
+    }
+    return $null
 }
 
 $configPath = Join-Path $PSScriptRoot "Data\config.json"
@@ -44,11 +143,20 @@ if (-not (Test-Path -LiteralPath $requirementsPath -PathType Leaf)) {
 }
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
-    if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
-        throw "Python launcher not found. Install Python 3.11 from python.org."
+    $python311 = Find-Python311
+    if (-not $python311) {
+        Install-SystemPackage `
+            -DisplayName "Python 3.11" `
+            -WingetId "Python.Python.3.11" `
+            -ChocolateyId "python311" | Out-Null
+        Update-ProcessPath
+        $python311 = Find-Python311
+    }
+    if (-not $python311) {
+        throw "Python 3.11 is still unavailable. Install it, reopen PowerShell, and run setup.ps1 again."
     }
     Write-Host "Creating a Python 3.11 virtual environment..."
-    & py -3.11 -m venv $venvDirectory
+    & $python311.Command @($python311.Arguments) -m venv $venvDirectory
     $venvCode = $LASTEXITCODE
     Assert-NativeSuccess -Operation "Virtual environment creation" -ExitCode $venvCode
 }
@@ -77,15 +185,38 @@ if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
     Write-Host "FFmpeg found."
 }
 else {
-    Write-Warning "FFmpeg was not found on PATH. Install it before using /play."
+    Install-SystemPackage `
+        -DisplayName "FFmpeg" `
+        -WingetId "Gyan.FFmpeg" `
+        -ChocolateyId "ffmpeg" | Out-Null
+    if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+        Write-Host "FFmpeg installed."
+    }
+    else {
+        Write-Warning "FFmpeg is not available in this PowerShell session. Reopen PowerShell before using /play."
+    }
 }
 
 if (Get-Command node -ErrorAction SilentlyContinue) {
     Write-Host "Node.js found."
 }
 else {
-    Write-Warning "Node.js was not found. Current yt-dlp releases may need a JavaScript runtime for YouTube."
+    Install-SystemPackage `
+        -DisplayName "Node.js LTS" `
+        -WingetId "OpenJS.NodeJS.LTS" `
+        -ChocolateyId "nodejs-lts" | Out-Null
+    if (Get-Command node -ErrorAction SilentlyContinue) {
+        Write-Host "Node.js LTS installed."
+    }
+    else {
+        Write-Warning "Node.js is not available in this PowerShell session. Reopen PowerShell if yt-dlp requests a JavaScript runtime."
+    }
 }
+
+Write-Host "Creating a recoverable database snapshot before startup checks..."
+& $venvPython (Join-Path $PSScriptRoot "runtime_backup.py") backup --keep 14 --quiet
+$backupCode = $LASTEXITCODE
+Assert-NativeSuccess -Operation "Runtime database backup" -ExitCode $backupCode
 
 Write-Host "Checking the installation..."
 & $venvPython (Join-Path $PSScriptRoot "bot.py") --check

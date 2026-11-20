@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from config_loader import AUTOMATIC_SETUP_VERSION
@@ -22,6 +23,66 @@ MANAGED_RESOURCES_KEY = "managedResources"
 TEXT_CHANNEL = 0
 VOICE_CHANNEL = 2
 CATEGORY_CHANNEL = 4
+
+# Permissions needed by always-loaded Project L features. Keeping this list in
+# one place makes both preflight errors and the generated OAuth invite exact.
+PROJECT_L_PERMISSION_SPECS = (
+    ("kick_members", "Kick Members", 1 << 1, "moderation"),
+    ("ban_members", "Ban Members", 1 << 2, "moderation"),
+    ("manage_channels", "Manage Channels", 1 << 4, "core"),
+    ("manage_guild", "Manage Server", 1 << 5, "invites"),
+    ("add_reactions", "Add Reactions", 1 << 6, "giveaways"),
+    ("view_audit_log", "View Audit Log", 1 << 7, "logging"),
+    ("view_channel", "View Channels", 1 << 10, "core"),
+    ("send_messages", "Send Messages", 1 << 11, "core"),
+    ("manage_messages", "Manage Messages", 1 << 13, "moderation"),
+    ("embed_links", "Embed Links", 1 << 14, "core"),
+    ("attach_files", "Attach Files", 1 << 15, "core"),
+    ("read_message_history", "Read Message History", 1 << 16, "core"),
+    ("mention_everyone", "Mention @everyone, @here, and All Roles", 1 << 17, "alerts"),
+    ("connect", "Connect", 1 << 20, "voice"),
+    ("speak", "Speak", 1 << 21, "voice"),
+    ("manage_roles", "Manage Roles", 1 << 28, "roles"),
+    ("manage_expressions", "Manage Expressions", 1 << 30, "moderation"),
+    ("moderate_members", "Moderate Members", 1 << 40, "moderation"),
+)
+
+
+def required_bot_permissions(_config: Mapping[str, Any] | None = None) -> int:
+    """Return the permission integer for the bot's always-loaded features."""
+    return sum(bit for _name, _label, bit, _feature in PROJECT_L_PERMISSION_SPECS)
+
+
+def build_bot_invite_url(client_id: int, guild_id: int = 0) -> str:
+    """Build the least-privilege OAuth URL used by Project L onboarding."""
+    query = {
+        "client_id": str(int(client_id)),
+        "scope": "bot applications.commands",
+        "permissions": str(required_bot_permissions()),
+    }
+    if guild_id:
+        query["guild_id"] = str(int(guild_id))
+        query["disable_guild_select"] = "true"
+    return "https://discord.com/oauth2/authorize?" + urlencode(query)
+
+
+def discover_bot_user_id(
+    token: str,
+    *,
+    timeout: float = 15,
+    request_json: RequestJson | None = None,
+) -> int:
+    """Resolve a bot token to its public user/application ID without a guild."""
+    clean_token = str(token or "").strip()
+    if not clean_token:
+        raise DiscordProvisioningError("Enter the Discord bot token first.")
+    requester = _request_json if request_json is None else request_json
+    bot_user = requester("GET", "users/@me", clean_token, timeout)
+    if not isinstance(bot_user, Mapping) or not bot_user.get("id"):
+        raise DiscordProvisioningError(
+            "Discord returned an invalid bot account response."
+        )
+    return int(bot_user["id"])
 
 
 class DiscordProvisioningError(RuntimeError):
@@ -105,8 +166,8 @@ def _request_json(
                 401: "Discord rejected the bot token.",
                 403: (
                     "Discord denied automatic server setup. Invite the bot with "
-                    "Manage Channels, View Channels, Send Messages, Embed Links, "
-                    "Attach Files, Read Message History, and Manage Roles."
+                    "the setup wizard's exact Invite Bot button, move its bot role "
+                    "above self-service roles, and try again."
                 ),
                 404: "Discord could not find the configured server or resource.",
                 429: "Discord kept rate-limiting setup. Wait a moment and try again.",
@@ -171,38 +232,23 @@ def _fetch_snapshot(
     for role_id in bot_role_ids:
         permissions |= _permission_value(role_index.get(role_id, {}).get("permissions"))
     administrator = bool(permissions & PERMISSION_BITS["administrator"])
-    required_permissions = (
-        "manage_channels",
-        "view_channel",
-        "send_messages",
-        "embed_links",
-        "attach_files",
-        "read_message_history",
-        "manage_roles",
-        "connect",
-        "speak",
-    )
     missing_permissions = [
-        name
-        for name in required_permissions
-        if not administrator and not permissions & PERMISSION_BITS[name]
+        (name, label, feature)
+        for name, label, bit, feature in PROJECT_L_PERMISSION_SPECS
+        if not administrator and not permissions & bit
     ]
     if missing_permissions:
-        labels = {
-            "manage_channels": "Manage Channels",
-            "view_channel": "View Channels",
-            "send_messages": "Send Messages",
-            "embed_links": "Embed Links",
-            "attach_files": "Attach Files",
-            "read_message_history": "Read Message History",
-            "manage_roles": "Manage Roles",
-            "connect": "Connect",
-            "speak": "Speak",
-        }
+        grouped: dict[str, list[str]] = {}
+        for _name, label, feature in missing_permissions:
+            grouped.setdefault(feature, []).append(label)
+        summary = "; ".join(
+            f"{feature}: {', '.join(labels)}" for feature, labels in grouped.items()
+        )
+        invite_url = build_bot_invite_url(bot_user_id, guild_id)
         raise DiscordProvisioningError(
-            "The bot is missing permissions required for automatic setup: "
-            + ", ".join(labels[name] for name in missing_permissions)
-            + ". Update the bot role or reinvite it, then try again."
+            "The bot is missing permissions required by enabled Project L features. "
+            f"{summary}. Reinvite it with the exact scopes and permissions, then "
+            f"try again: {invite_url}"
         )
 
     return _DiscordSnapshot(
@@ -222,7 +268,7 @@ def validate_provisioning_access(
     timeout: float = 15,
     request_json: RequestJson = _request_json,
 ) -> int:
-    """Validate the token, guild membership, and Manage Channels permission."""
+    """Validate bot identity, guild membership, and required feature permissions."""
     return _fetch_snapshot(config, token, timeout, request_json).bot_user_id
 
 
@@ -253,6 +299,103 @@ def _staff_role_ids(snapshot: _DiscordSnapshot) -> list[int]:
         ):
             result.append(role_id)
     return result
+
+
+def _bot_top_role_position(snapshot: _DiscordSnapshot) -> int:
+    bot_role_ids = {int(role_id) for role_id in snapshot.bot_member.get("roles", [])}
+    return max(
+        (
+            int(role.get("position", 0) or 0)
+            for role in snapshot.roles
+            if int(role.get("id", 0) or 0) in bot_role_ids
+        ),
+        default=0,
+    )
+
+
+def _ensure_role(
+    *,
+    snapshot: _DiscordSnapshot,
+    request_json: RequestJson,
+    token: str,
+    timeout: float,
+    report: DiscordProvisioningReport,
+    label: str,
+    name: str,
+    preferred_id: int,
+    mentionable: bool,
+) -> dict[str, Any]:
+    """Reuse an assignable role or create a safe no-permission role."""
+    top_position = _bot_top_role_position(snapshot)
+
+    def usable(role: Mapping[str, Any]) -> bool:
+        return bool(
+            int(role.get("id", 0) or 0) != snapshot.guild_id
+            and not role.get("managed", False)
+            and int(role.get("position", 0) or 0) < top_position
+            # Verification and streamer roles are granted by self-service
+            # controls. Never reuse a role carrying server permissions.
+            and _permission_value(role.get("permissions")) == 0
+        )
+
+    role = next(
+        (
+            candidate
+            for candidate in snapshot.roles
+            if int(candidate.get("id", 0) or 0) == preferred_id and usable(candidate)
+        ),
+        None,
+    )
+    if role is None:
+        role = next(
+            (
+                candidate
+                for candidate in snapshot.roles
+                if str(candidate.get("name", "")).casefold() == name.casefold()
+                and usable(candidate)
+            ),
+            None,
+        )
+
+    if role is None:
+        created = request_json(
+            "POST",
+            f"guilds/{snapshot.guild_id}/roles",
+            token,
+            timeout,
+            {
+                "name": name,
+                "permissions": "0",
+                "color": 0,
+                "hoist": False,
+                "mentionable": mentionable,
+            },
+        )
+        if not isinstance(created, Mapping) or not created.get("id"):
+            raise DiscordProvisioningError(
+                f"Discord did not return the new {label} role."
+            )
+        role = dict(created)
+        snapshot.roles.append(role)
+        report.created.append(f"{label} role")
+        return role
+
+    if bool(role.get("mentionable", False)) != mentionable:
+        updated = request_json(
+            "PATCH",
+            f"guilds/{snapshot.guild_id}/roles/{int(role['id'])}",
+            token,
+            timeout,
+            {"mentionable": mentionable},
+        )
+        if isinstance(updated, Mapping):
+            role.update(updated)
+        else:
+            role["mentionable"] = mentionable
+        report.updated.append(f"{label} role")
+    else:
+        report.reused.append(f"{label} role")
+    return role
 
 
 def _private_overwrites(snapshot: _DiscordSnapshot) -> list[dict[str, Any]]:
@@ -606,6 +749,15 @@ def configuration_without_managed_channels(
         if isinstance(clean.get(key), dict):
             for child in clean[key]:
                 clean[key][child] = 0
+    if isinstance(clean.get(MANAGED_RESOURCES_KEY), dict):
+        for child in (
+            "communityCategory",
+            "staffCategory",
+            "statsCategory",
+            "alertsChannel",
+            "panelsChannel",
+        ):
+            clean[MANAGED_RESOURCES_KEY][child] = 0
     for friend in clean.get("friendTwitch", []):
         if isinstance(friend, dict):
             friend["friendChannelId"] = 0
@@ -625,6 +777,31 @@ def provision_guild_resources(
     report = DiscordProvisioningReport()
     managed = _managed_resources(updated_config)
     updated_config["client_id"] = snapshot.bot_user_id
+
+    verified_role = _ensure_role(
+        snapshot=snapshot,
+        request_json=request_json,
+        token=token,
+        timeout=timeout,
+        report=report,
+        label="verified",
+        name="Project L Verified",
+        preferred_id=_permission_value(updated_config.get("verified")),
+        mentionable=False,
+    )
+    updated_config["verified"] = _permission_value(verified_role.get("id"))
+    streamer_role = _ensure_role(
+        snapshot=snapshot,
+        request_json=request_json,
+        token=token,
+        timeout=timeout,
+        report=report,
+        label="streamer",
+        name="Project L Streamer",
+        preferred_id=_permission_value(updated_config.get("streamRole")),
+        mentionable=False,
+    )
+    updated_config["streamRole"] = _permission_value(streamer_role.get("id"))
 
     private_overwrites = _private_overwrites(snapshot)
     public_overwrites = _public_readonly_overwrites(snapshot)
@@ -677,6 +854,22 @@ def provision_guild_resources(
     updated_config["welcome"] = _channel_id(welcome)
     # Welcome images are attached directly to the public welcome message now.
     updated_config["welcome_images"] = 0
+
+    panels = _ensure_resource(
+        snapshot=snapshot,
+        request_json=request_json,
+        token=token,
+        timeout=timeout,
+        report=report,
+        key="panels",
+        label="setup panels channel",
+        name="project-l-panels",
+        channel_type=TEXT_CHANNEL,
+        preferred_ids=[_permission_value(managed.get("panelsChannel"))],
+        parent_id=_channel_id(community),
+        overwrites=public_overwrites,
+    )
+    managed["panelsChannel"] = _channel_id(panels)
 
     log_channels = _mapping(updated_config, "logChannelIds")
     logs = _ensure_resource(

@@ -232,7 +232,7 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
         self.assertIn("Administrator permission", warning_text)
         self.assertIn("Help Ticket Category is visible to nonstaff roles", warning_text)
         self.assertIn("Transcript Channel is visible to nonstaff roles", warning_text)
-        self.assertIn("Streamer Role is not mentionable", warning_text)
+        self.assertNotIn("Streamer Role is not mentionable", warning_text)
         self.assertIn("1 recognizable ticket channel(s)", warning_text)
 
     def test_live_report_fetches_the_bot_guild_member(self):
@@ -282,6 +282,29 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
         wizard.messagebox.showinfo.assert_not_called()
         wizard.root.destroy.assert_called_once()
         wizard.validated_live_values.assert_called_once_with(provision=True)
+
+    def test_gui_invite_button_uses_entered_bot_and_server(self):
+        wizard = object.__new__(ProjectLSetupWizard)
+        wizard.variables = {
+            "token": Mock(get=Mock(return_value="bot-token")),
+            "guildId": Mock(get=Mock(return_value="123456")),
+        }
+        wizard.root = Mock()
+        wizard.messagebox = Mock()
+        wizard.set_status = Mock()
+        with (
+            patch("configure_gui.discover_bot_user_id", return_value=654321),
+            patch(
+                "configure_gui.build_bot_invite_url",
+                return_value="https://discord.example/invite",
+            ) as build_invite,
+            patch("configure_gui.webbrowser.open", return_value=True) as open_browser,
+        ):
+            wizard.open_bot_invite()
+
+        build_invite.assert_called_once_with(654321, 123456)
+        open_browser.assert_called_once_with("https://discord.example/invite")
+        wizard.messagebox.showerror.assert_not_called()
 
     def test_gui_validate_is_read_only_and_does_not_provision(self):
         wizard = object.__new__(ProjectLSetupWizard)

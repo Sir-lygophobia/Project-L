@@ -12,6 +12,7 @@
   "logs": 0,
   "modmail": 0,
   "kickMemberFunction": false,
+  "logMessageContent": false,
   "voicecategory": 0,
   "streamRole": 0,
   "ytChannel": "",
@@ -24,6 +25,7 @@
     "staffCategory": 0,
     "statsCategory": 0,
     "alertsChannel": 0,
+    "panelsChannel": 0,
     "provisioningVersion": 0
   },
   "tickets": {

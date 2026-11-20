@@ -46,8 +46,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $errors = $null
-          $tokens = $null
-          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path setup.ps1), [ref]$tokens, [ref]$errors) | Out-Null
-          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path start.ps1), [ref]$tokens, [ref]$errors) | Out-Null
-          if ($errors) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+          $allErrors = @()
+          @('setup.ps1', 'start.ps1', 'configure.ps1', 'smoke-test.ps1') | ForEach-Object {
+            $errors = $null
+            $tokens = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $_), [ref]$tokens, [ref]$errors) | Out-Null
+            $allErrors += @($errors)
+          }
+          if ($allErrors) { $allErrors | ForEach-Object { Write-Error $_ }; exit 1 }

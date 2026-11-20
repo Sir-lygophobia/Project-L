@@ -30,6 +30,7 @@ PERMISSION_BITS = {
     "embed_links": 1 << 14,
     "attach_files": 1 << 15,
     "read_message_history": 1 << 16,
+    "mention_everyone": 1 << 17,
     "connect": 1 << 20,
     "speak": 1 << 21,
     "manage_roles": 1 << 28,
@@ -63,6 +64,21 @@ def _nested(config: Mapping[str, Any], parent: str, child: str) -> Any:
 
 def _channel_specs(config: Mapping[str, Any]):
     category_specs = [
+        (
+            "Community Category",
+            _nested(config, "managedResources", "communityCategory"),
+            {4},
+        ),
+        (
+            "Staff Category",
+            _nested(config, "managedResources", "staffCategory"),
+            {4},
+        ),
+        (
+            "Server Statistics Category",
+            _nested(config, "managedResources", "statsCategory"),
+            {4},
+        ),
         ("Modmail Category", config.get("modmail", 0), {4}),
         ("Private Voice Category", config.get("voicecategory", 0), {4}),
         (
@@ -82,6 +98,16 @@ def _channel_specs(config: Mapping[str, Any]):
         ),
     ]
     text_specs = [
+        (
+            "Setup Panels Channel",
+            _nested(config, "managedResources", "panelsChannel"),
+            {0, 5},
+        ),
+        (
+            "Alerts Channel",
+            _nested(config, "managedResources", "alertsChannel"),
+            {0, 5},
+        ),
         ("Welcome Channel", config.get("welcome", 0), {0, 5}),
         ("Welcome Image Channel", config.get("welcome_images", 0), {0, 5}),
         ("Invite Log Channel", config.get("invitechannel", 0), {0, 5}),
@@ -375,12 +401,16 @@ def validate_discord_snapshot_report(
             stream_role_id
             and stream_role is not None
             and not stream_role.get("mentionable", False)
+            and not (
+                administrator or base_permissions & PERMISSION_BITS["mention_everyone"]
+            )
         ):
             warnings.append(
                 "Streamer Role is not mentionable, so Twitch alerts cannot mention it."
             )
 
         private_labels = {
+            "Staff Category",
             "Modmail Category",
             "Help Ticket Category",
             "Suggestion Ticket Category",

@@ -6,7 +6,10 @@ from pathlib import Path
 from config_loader import AUTOMATIC_SETUP_VERSION
 from discord_provisioning import (
     DiscordProvisioningError,
+    build_bot_invite_url,
+    discover_bot_user_id,
     provision_guild_resources,
+    required_bot_permissions,
     validate_provisioning_access,
 )
 from discord_validation import PERMISSION_BITS
@@ -21,21 +24,9 @@ class FakeDiscordApi:
         self.bot_id = 200
         self.next_id = 1000
         self.channels = []
-        bot_permissions = sum(
-            PERMISSION_BITS[name]
-            for name in (
-                "view_channel",
-                "send_messages",
-                "embed_links",
-                "attach_files",
-                "read_message_history",
-                "manage_roles",
-                "connect",
-                "speak",
-            )
-        )
-        if allow_manage_channels:
-            bot_permissions |= PERMISSION_BITS["manage_channels"]
+        bot_permissions = required_bot_permissions()
+        if not allow_manage_channels:
+            bot_permissions &= ~PERMISSION_BITS["manage_channels"]
         self.roles = [
             {
                 "id": str(self.guild_id),
@@ -48,6 +39,7 @@ class FakeDiscordApi:
                 "name": "Project L",
                 "permissions": str(bot_permissions),
                 "position": 10,
+                "managed": True,
             },
             {
                 "id": "202",
@@ -77,6 +69,19 @@ class FakeDiscordApi:
             self.next_id += 1
             self.channels.append(channel)
             return deepcopy(channel)
+        if method == "POST" and path == f"guilds/{self.guild_id}/roles":
+            role = deepcopy(payload)
+            role["id"] = str(self.next_id)
+            role["position"] = 1
+            role["managed"] = False
+            self.next_id += 1
+            self.roles.append(role)
+            return deepcopy(role)
+        if method == "PATCH" and path.startswith(f"guilds/{self.guild_id}/roles/"):
+            role_id = int(path.rsplit("/", maxsplit=1)[1])
+            role = next(role for role in self.roles if int(role["id"]) == role_id)
+            role.update(deepcopy(payload))
+            return deepcopy(role)
         if method == "PATCH" and path.startswith("channels/"):
             channel_id = int(path.split("/", maxsplit=1)[1])
             channel = next(
@@ -137,6 +142,9 @@ class DiscordProvisioningTests(unittest.TestCase):
             AUTOMATIC_SETUP_VERSION,
         )
         self.assertTrue(config["welcome"])
+        self.assertTrue(config["verified"])
+        self.assertTrue(config["streamRole"])
+        self.assertTrue(config["managedResources"]["panelsChannel"])
         self.assertEqual(config["welcome_images"], 0)
         self.assertTrue(config["transcripts"])
         self.assertTrue(config["modmail"])
@@ -240,6 +248,58 @@ class DiscordProvisioningTests(unittest.TestCase):
                 request_json=api,
             )
         self.assertEqual(api.channels, [])
+
+    def test_exact_invite_url_contains_scopes_permissions_and_server(self):
+        url = build_bot_invite_url(200, 100)
+        self.assertIn("client_id=200", url)
+        self.assertIn("scope=bot+applications.commands", url)
+        self.assertIn(f"permissions={required_bot_permissions()}", url)
+        self.assertIn("guild_id=100", url)
+        self.assertIn("disable_guild_select=true", url)
+
+    def test_bot_user_id_can_be_discovered_before_guild_invitation(self):
+        calls = []
+
+        def request(method, path, token, timeout):
+            calls.append((method, path, token, timeout))
+            return {"id": "24680"}
+
+        self.assertEqual(
+            discover_bot_user_id("secret-token", request_json=request),
+            24680,
+        )
+        self.assertEqual(calls[0][:3], ("GET", "users/@me", "secret-token"))
+
+        with self.assertRaisesRegex(DiscordProvisioningError, "token"):
+            discover_bot_user_id("", request_json=request)
+
+    def test_self_service_roles_never_reuse_a_privileged_role(self):
+        privileged_role = {
+            "id": "333",
+            "name": "Project L Verified",
+            "permissions": str(PERMISSION_BITS["administrator"]),
+            "position": 5,
+            "managed": False,
+            "mentionable": False,
+        }
+        self.api.roles.append(privileged_role)
+        self.config["verified"] = 333
+
+        config, _report = provision_guild_resources(
+            self.config,
+            token="token",
+            request_json=self.api,
+        )
+
+        self.assertNotEqual(config["verified"], 333)
+        created = next(
+            role for role in self.api.roles if int(role["id"]) == config["verified"]
+        )
+        self.assertEqual(int(created["permissions"]), 0)
+        streamer = next(
+            role for role in self.api.roles if int(role["id"]) == config["streamRole"]
+        )
+        self.assertFalse(streamer["mentionable"])
 
     def test_malformed_hidden_ids_are_replaced_instead_of_crashing(self):
         self.config["logs"] = "not-an-id"

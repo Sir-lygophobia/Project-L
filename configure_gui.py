@@ -11,7 +11,9 @@ import webbrowser
 from config_loader import ConfigError, load_role_ids
 from discord_provisioning import (
     DiscordProvisioningError,
+    build_bot_invite_url,
     configuration_without_managed_channels,
+    discover_bot_user_id,
     provision_guild_resources,
     validate_provisioning_access,
 )
@@ -22,6 +24,7 @@ from setup_config import (
     configuration_status,
     flatten_config,
     load_editable_config,
+    parse_discord_id,
     save_configuration,
 )
 
@@ -206,21 +209,27 @@ class ProjectLSetupWizard:
             footer,
             text="Required fields are marked with *.",
             style="Status.TLabel",
-            wraplength=480,
+            wraplength=760,
         )
-        self.status.grid(row=0, column=0, sticky="w")
+        self.status.grid(
+            row=0,
+            column=0,
+            columnspan=4,
+            sticky="ew",
+            pady=(0, 8),
+        )
         self.ttk.Button(footer, text="Cancel", command=self.cancel).grid(
-            row=0, column=1, padx=(8, 0)
+            row=1, column=1, padx=(8, 0)
         )
         self.ttk.Button(footer, text="Validate", command=self.validate_only).grid(
-            row=0, column=2, padx=(8, 0)
+            row=1, column=2, padx=(8, 0)
         )
         self.ttk.Button(
             footer,
-            text="Save & Create Setup",
+            text="Save & Create",
             command=self.save,
             style="Accent.TButton",
-        ).grid(row=0, column=3, padx=(8, 0))
+        ).grid(row=1, column=3, padx=(8, 0))
 
     def _section(self, tab_name: str, title: str, description: str = ""):
         parent = self.tabs[tab_name].content
@@ -348,6 +357,28 @@ class ProjectLSetupWizard:
             text="Open Discord Developer Portal",
             command=lambda: webbrowser.open(DISCORD_APPLICATIONS_URL),
         ).pack(side="left", padx=(14, 0))
+        self.ttk.Button(
+            controls,
+            text="Invite Bot to Server",
+            command=self.open_bot_invite,
+        ).pack(side="left", padx=(14, 0))
+
+        self.ttk.Label(
+            self.tabs["core"].content,
+            text=(
+                "The invite button requests only the permissions Project L uses. "
+                "If the bot is already in the server, opening the invite again updates "
+                "its server permissions without creating a second bot."
+            ),
+            style="Help.TLabel",
+            wraplength=760,
+            justify="left",
+        ).grid(
+            row=self.tabs["core"].content.grid_size()[1],
+            column=0,
+            sticky="w",
+            pady=(0, 12),
+        )
 
         self._section(
             "core",
@@ -369,6 +400,34 @@ class ProjectLSetupWizard:
             pady=(2, 12),
         )
 
+        message_logging = self.tk.BooleanVar(
+            value=bool(self.initial_values.get("logMessageContent", False))
+        )
+        self.variables["logMessageContent"] = message_logging
+        self.ttk.Checkbutton(
+            self.tabs["core"].content,
+            text="Include edited/deleted message text and attachment URLs in logs",
+            variable=message_logging,
+        ).grid(
+            row=self.tabs["core"].content.grid_size()[1],
+            column=0,
+            sticky="w",
+            pady=(2, 2),
+        )
+        self.ttk.Label(
+            self.tabs["core"].content,
+            text=(
+                "Privacy-sensitive and disabled by default. Metadata-only logging "
+                "continues when this option is off."
+            ),
+            style="Help.TLabel",
+        ).grid(
+            row=self.tabs["core"].content.grid_size()[1],
+            column=0,
+            sticky="w",
+            pady=(0, 12),
+        )
+
         if os.environ.get("DISCORD_BOT_TOKEN", "").strip():
             self.ttk.Label(
                 self.tabs["core"].content,
@@ -384,15 +443,19 @@ class ProjectLSetupWizard:
     def _build_channels_tab(self):
         self._section(
             "channels",
-            "Optional server roles",
-            "Channels and categories no longer need IDs. Only add role IDs for role-based features you plan to use.",
+            "Existing role overrides (optional)",
+            "Leave these blank and Project L creates safe verified and streamer roles automatically. Enter an ID only to reuse an existing zero-permission role below the bot's highest role.",
         )
         fields = (
-            ("verified", "Verified Role ID", "Granted by the Verify button."),
+            (
+                "verified",
+                "Verified Role ID",
+                "Optional existing role; otherwise setup creates Project L Verified.",
+            ),
             (
                 "streamRole",
                 "Streamer Role ID",
-                "Mentioned for the primary Twitch notification.",
+                "Optional existing role; otherwise setup creates Project L Streamer.",
             ),
         )
         for key, label, help_text in fields:
@@ -420,7 +483,7 @@ class ProjectLSetupWizard:
         self._section(
             "tickets",
             "Public resources",
-            "A community category with a read-only welcome channel and, when an integration is enabled, one shared YouTube/Twitch alerts channel.",
+            "A community category with read-only welcome and setup-panel channels and, when an integration is enabled, one shared YouTube/Twitch alerts channel.",
         )
         self._section(
             "tickets",
@@ -473,7 +536,6 @@ class ProjectLSetupWizard:
             "twClientId",
             "Twitch Client ID",
             "Twitch Developer Console application client ID.",
-            secret=True,
         )
         self._entry(
             "integrations",
@@ -501,6 +563,41 @@ class ProjectLSetupWizard:
         for key, widget in self.text_widgets.items():
             values[key] = widget.get("1.0", "end").strip()
         return values
+
+    def open_bot_invite(self):
+        """Open an exact, guild-scoped Discord OAuth invite for this bot."""
+        try:
+            guild_id = parse_discord_id(
+                self.variables["guildId"].get(),
+                "Discord server ID",
+                required=True,
+            )
+            token = (
+                self.variables["token"].get().strip()
+                or os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+            )
+            self.set_status("Checking the bot token and preparing its invite...")
+            self.root.update_idletasks()
+            client_id = discover_bot_user_id(token)
+        except (ConfigError, DiscordProvisioningError, ValueError) as exc:
+            self.set_status("Enter a valid bot token and server ID first.", error=True)
+            self.messagebox.showerror(
+                "Could not create bot invite", str(exc), parent=self.root
+            )
+            return
+
+        url = build_bot_invite_url(client_id, guild_id)
+        if not webbrowser.open(url):
+            self.set_status("The Discord invite could not be opened.", error=True)
+            self.messagebox.showerror(
+                "Could not open Discord",
+                "Copy and open this URL in your browser:\n\n" + url,
+                parent=self.root,
+            )
+            return
+        self.set_status(
+            "Opened Discord with Project L's required permissions.", success=True
+        )
 
     def validated_values(self):
         return build_configuration(

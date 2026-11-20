@@ -38,6 +38,38 @@ class SetupConfigTests(unittest.TestCase):
         values["guildId"] = "123456789"
         return values
 
+    @staticmethod
+    def mark_automatically_provisioned(config):
+        next_id = 1000
+
+        def generated_id():
+            nonlocal next_id
+            next_id += 1
+            return next_id
+
+        for key in (
+            "welcome",
+            "invitechannel",
+            "verified",
+            "transcripts",
+            "logs",
+            "modmail",
+            "voicecategory",
+            "streamRole",
+        ):
+            config[key] = generated_id()
+        for mapping_name in ("tickets", "serverStatChannelIds", "logChannelIds"):
+            for key in config[mapping_name]:
+                config[mapping_name][key] = generated_id()
+        for key in (
+            "communityCategory",
+            "staffCategory",
+            "statsCategory",
+            "panelsChannel",
+        ):
+            config["managedResources"][key] = generated_id()
+        config["managedResources"]["provisioningVersion"] = AUTOMATIC_SETUP_VERSION
+
     def test_minimal_configuration_is_valid(self):
         config, role_ids = build_configuration(
             self.valid_values(), self.example, environ={}
@@ -220,7 +252,7 @@ class SetupConfigTests(unittest.TestCase):
             self.example,
             environ={"DISCORD_BOT_TOKEN": "environment-secret"},
         )
-        config["managedResources"]["provisioningVersion"] = AUTOMATIC_SETUP_VERSION
+        self.mark_automatically_provisioned(config)
         with tempfile.TemporaryDirectory() as directory:
             config_path = Path(directory) / "config.json"
             roles_path = Path(directory) / "roles.json"
@@ -251,7 +283,7 @@ class SetupConfigTests(unittest.TestCase):
                 roles_path=roles_path,
             )
             complete, reasons = configuration_status(config_path, roles_path)
-            config["managedResources"]["provisioningVersion"] = AUTOMATIC_SETUP_VERSION
+            self.mark_automatically_provisioned(config)
             save_configuration(
                 config,
                 roles,

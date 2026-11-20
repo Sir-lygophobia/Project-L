@@ -10,7 +10,7 @@ from typing import Any
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "Data" / "config.json"
 ROLES_PATH = BASE_DIR / "Data" / "roles.json"
-AUTOMATIC_SETUP_VERSION = 1
+AUTOMATIC_SETUP_VERSION = 2
 
 ID_FIELDS = (
     "guildId",
@@ -81,6 +81,9 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise ConfigError(f"{path} must contain one JSON object.")
 
+    # Added as a privacy-safe default for existing installations.
+    config.setdefault("logMessageContent", False)
+
     required_fields = set(ID_FIELDS + STRING_FIELDS + MAPPING_FIELDS) | {
         "kickMemberFunction",
         "friendTwitch",
@@ -103,6 +106,10 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     if not isinstance(config["kickMemberFunction"], bool):
         raise ConfigError(
             'Configuration field "kickMemberFunction" must be true or false.'
+        )
+    if not isinstance(config["logMessageContent"], bool):
+        raise ConfigError(
+            'Configuration field "logMessageContent" must be true or false.'
         )
 
     if not isinstance(config["friendTwitch"], list):

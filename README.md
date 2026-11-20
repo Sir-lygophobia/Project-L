@@ -6,30 +6,33 @@ sticky messages, Twitch notifications, YouTube notifications, and server stats.
 
 ## Quick start on Windows
 
-Project L is tested with Python 3.11. The included setup script creates an
-isolated `.venv`, installs every Python dependency, checks FFmpeg, initializes
-the SQLite tables, verifies that all bot extensions load, and opens a graphical
-configuration wizard.
+Project L is tested with Python 3.11. The included setup script installs missing
+Python 3.11, FFmpeg, and Node.js LTS through Winget or Chocolatey when available,
+creates an isolated `.venv`, installs every Python dependency, backs up existing
+databases, verifies all bot extensions, and opens a graphical configuration
+wizard.
 
-1. Create a bot in the Discord Developer Portal and invite it with the `bot`
-   and `applications.commands` scopes.
-   Give its role **Manage Channels**, **Manage Roles**, **View Channels**,
-   **Send Messages**, **Embed Links**, **Attach Files**, and
-   **Read Message History**, **Connect**, and **Speak**.
-2. On the bot page, enable these privileged gateway intents:
+1. Create a bot in the Discord Developer Portal. On its bot page, enable these
+   privileged gateway intents:
+
    - Presence Intent
    - Server Members Intent
    - Message Content Intent
-3. Open PowerShell in this project directory and run:
+
+2. Open PowerShell in this project directory and run:
 
    ```powershell
    .\setup.ps1
    ```
 
-4. In the setup window, enter the Discord bot token and server ID. Fill in only
-   the optional roles and integrations you plan to use, then select
-   **Save & Create Setup**. Project L creates, secures, and remembers all of its
-   required channels and categories automatically.
+3. In the setup window, enter the Discord bot token and server ID, then select
+   **Invite Bot to Server**. Discord opens an invite for that server with the
+   exact application-command scopes and permissions the enabled bot features
+   use. Authorize it, return to setup, and select **Save & Create**.
+4. Project L creates or reuses its verified and streamer roles, secured
+   categories and channels, statistics counters, and setup-panel channel. It
+   remembers all generated IDs automatically; no channel or category IDs are
+   requested.
 5. Start the bot:
 
    ```powershell
@@ -38,16 +41,18 @@ configuration wizard.
 
 The first setup can take several minutes. Future starts only need
 `.\start.ps1`. Startup automatically reruns dependency setup when
-`requirements.txt` changes and prevents a second copy of the bot from launching
-from the same folder. If required configuration is missing, start opens the
-wizard automatically. Run `.\configure.ps1` whenever you want to change the
-settings.
+`requirements.txt` changes, creates a verified database snapshot, prevents a
+second copy from the same folder, and restarts the bot up to five times after an
+unexpected crash. If required configuration is missing or its provisioning
+version is outdated, start opens the wizard automatically. Run
+`.\configure.ps1` whenever you want to change settings or repair deleted
+managed resources.
 
 The wizard masks secret fields, validates related settings together, checks the
-bot's permissions, reuses valid Project L resources, creates anything missing,
-and saves the generated IDs to the local, Git-ignored `Data/config.json` and
-`Data/roles.json` files. Running setup again is safe and does not delete server
-channels.
+bot's permissions and role hierarchy, reuses valid Project L resources, creates
+anything missing, and saves generated IDs to the local, Git-ignored
+`Data/config.json` and `Data/roles.json` files. Running setup again is
+idempotent and does not delete server channels.
 
 To keep the bot token out of JSON entirely, set it before opening the wizard:
 
@@ -64,6 +69,10 @@ error when required settings are incomplete:
 .\start.ps1 -NoGui
 ```
 
+Use `.\setup.ps1 -SkipSystemDependencies` only when Python 3.11 is already
+installed and you intentionally do not want setup to install optional system
+tools.
+
 ## Configuration
 
 The graphical wizard is the recommended configuration method. Channel and
@@ -78,12 +87,18 @@ Important settings:
 - `client_id`: discovered from the bot token during setup.
 - `welcome`: automatic welcome output channel. Generated welcome images are
   attached directly to the welcome message.
-- `verified`: the role granted by the Verify button.
+- `verified` and `streamRole`: safe zero-permission roles created automatically
+  under the bot's highest role. The verified role is granted by the Verify
+  button; the streamer role permits private-voice creation and receives the
+  primary Twitch alert.
 - `invitechannel`, `modmail`, `transcripts`, `voicecategory`, `tickets`,
   `serverStatChannelIds`, and `logChannelIds` are filled automatically by the
   wizard. Audit events share one private staff log channel.
 - `kickMemberFunction`: leave `false` unless you intentionally want the monthly
   cleanup of members who have remained unverified for more than 30 days.
+- `logMessageContent`: privacy-sensitive and `false` by default. Enable it only
+  if staff logs should include edited/deleted message text and attachment URLs;
+  metadata logging continues when it is disabled.
 
 YouTube notifications only require `ytChannel`; setup creates the Discord alert
 channel. The source accepts an `@handle`, a `UC...` channel ID, or a full
@@ -122,6 +137,14 @@ Check whether the required configuration is complete without opening the GUI:
 .\.venv\Scripts\python.exe configure_gui.py --check
 ```
 
+After the bot has started once, run the read-only live smoke test. It checks the
+bot account, permissions, managed channels, roles, hierarchy, and all automatic
+panels against the real Discord server:
+
+```powershell
+.\smoke-test.ps1
+```
+
 Useful checks:
 
 ```powershell
@@ -131,8 +154,9 @@ node --version
 ```
 
 FFmpeg must be on `PATH` for `/play`. Node is used by current `yt-dlp` releases
-for YouTube extraction. Both are already available on the machine where this
-project was repaired.
+for YouTube extraction. Setup attempts to install both; if the current
+PowerShell process cannot see a newly installed command, reopen PowerShell and
+run setup again.
 
 If Discord rejects the connection for privileged intents, enable all three
 listed intents in the Developer Portal and restart. If a managed channel is
@@ -150,11 +174,42 @@ Modmail also requires a staff-only category that denies View Channel to
 
 Use `/help` in Discord after the application commands finish syncing.
 
+## Runtime recovery and logs
+
+Every normal start creates a consistent SQLite snapshot under `Backups/` and
+keeps the newest 14 snapshots. Runtime output is saved under
+`Data/bot-runtime-YYYYMMDD-HHMMSS.log`; the newest 10 logs are retained. These
+directories are ignored by Git.
+
+List or verify snapshots with:
+
+```powershell
+.\.venv\Scripts\python.exe runtime_backup.py list
+.\.venv\Scripts\python.exe runtime_backup.py verify "Backups\<snapshot>"
+```
+
+To restore, stop the bot first. Restore verifies hashes and SQLite integrity,
+then creates a recovery snapshot of the current databases before replacing
+them. The explicit `--force` flag prevents accidental restores:
+
+```powershell
+.\.venv\Scripts\python.exe runtime_backup.py restore "Backups\<snapshot>" --force
+```
+
+Use `.\start.ps1 -NoRestart` to disable crash restarts or
+`.\start.ps1 -NoRuntimeLog` to disable transcript logging for one run. The
+restart count and delay can be changed with `-MaxRestarts` and
+`-RestartDelaySeconds`.
+
 ## Self-role panels
 
-New `/reactionroles` panels upload `Data/self_roles.gif` directly to Discord,
-so their embedded image does not expire. Images supplied to `/say` are also
-reuploaded as durable message attachments.
+On first startup, Project L posts missing verification, private-voice, ticket,
+and configured reaction-role panels in the automatic `project-l-panels`
+channel. Existing panels are detected by their stable component IDs, so
+restarts do not post duplicates. New `/reactionroles` panels upload
+`Data/self_roles.gif` directly to Discord, so their embedded image does not
+expire. Images supplied to `/say` are also reuploaded as durable message
+attachments.
 
 If older Color, Gender, Age, Platform, Server Notification, or Game role panels
 show **Image failed to load**, run `/repairselfroles` in that channel as an
@@ -169,5 +224,10 @@ their existing buttons and unrelated attachments, and is safe to run again.
   Discord upload attempt.
 - Runtime `.db` files, credentials, virtual environments, and transcript text
   files are ignored by Git.
+- Edited/deleted message content and attachment URLs are excluded from logs by
+  default. Enable the clearly labeled privacy option in the setup GUI only if
+  your server policy requires them.
+- Twitch access tokens are cached in memory only. Sent stream IDs are retained
+  locally in SQLite so restarts do not repeat old notifications.
 - The databases included with this extracted copy contain existing Discord
   records. Back them up and treat them as private; do not publish the archive.

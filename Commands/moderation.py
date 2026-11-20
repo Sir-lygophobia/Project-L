@@ -13,6 +13,62 @@ from logFunction import print_interaction_info
 
 
 WARNINGS_DESCRIPTION_LIMIT = 3900
+MAX_PURGE_MESSAGES = 1000
+PURGE_CONFIRM_THRESHOLD = 100
+
+
+def purge_requires_confirmation(amount: int) -> bool:
+    return int(amount) >= PURGE_CONFIRM_THRESHOLD
+
+
+class DestructiveConfirmationView(discord.ui.View):
+    """Short-lived confirmation restricted to the administrator who invoked it."""
+
+    def __init__(self, user_id: int):
+        super().__init__(timeout=30)
+        self.user_id = int(user_id)
+        self.confirmed: bool | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the administrator who started this action can confirm it.",
+            ephemeral=True,
+        )
+        return False
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, _button):
+        self.confirmed = True
+        self.stop()
+        await interaction.response.edit_message(
+            content="Confirmed. Working…", view=None
+        )
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, _button):
+        self.confirmed = False
+        self.stop()
+        await interaction.response.edit_message(content="Cancelled.", view=None)
+
+
+async def confirm_destructive_action(
+    interaction: discord.Interaction,
+    prompt: str,
+) -> bool:
+    view = DestructiveConfirmationView(interaction.user.id)
+    await interaction.response.send_message(prompt, view=view, ephemeral=True)
+    timed_out = await view.wait()
+    if timed_out:
+        try:
+            await interaction.edit_original_response(
+                content="Confirmation expired; nothing was changed.",
+                view=None,
+            )
+        except discord.HTTPException:
+            pass
+    return view.confirmed is True
 
 
 def build_warning_pages(records, limit=WARNINGS_DESCRIPTION_LIMIT):
@@ -67,11 +123,9 @@ async def respond_to_interaction(interaction, *args, **kwargs):
     return await interaction.response.send_message(*args, **kwargs)
 
 
-
 class ModsCommand(commands.Cog):
     def __init__(self, client):
         self.client = client
-
 
     def connect(self):
         try:
@@ -82,15 +136,15 @@ class ModsCommand(commands.Cog):
             print(exc)
             return None
 
-
     @app_commands.command(name="steal", description="Steal an emoji")
     @app_commands.checks.has_permissions(manage_expressions=True)
     async def steal(self, interaction: discord.Interaction):
         print_interaction_info(interaction)
 
-        await interaction.response.send_message(f"{interaction.user.mention} React to this message with an emoji to steal") #, ephemeral=True, delete_after=0.5)
+        await interaction.response.send_message(
+            f"{interaction.user.mention} React to this message with an emoji to steal"
+        )  # , ephemeral=True, delete_after=0.5)
         return
-
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -100,27 +154,21 @@ class ModsCommand(commands.Cog):
             if msg.author.id == self.client.user.id:
                 if msg.content.startswith(payload.member.mention):
                     emoji = payload.emoji
-                    em = await channel.guild.create_custom_emoji(name=emoji.name, image=await emoji.read())
+                    em = await channel.guild.create_custom_emoji(
+                        name=emoji.name, image=await emoji.read()
+                    )
                     await msg.edit(content=f"Stole emoji {str(em)}")
         except Exception:
             print(traceback.format_exc())
 
-
-
-
-
-
-
-
-
-
     @steal.error
     async def catch(self, interaction, error):
         print(error)
-        raise(error)
+        raise (error)
 
-
-    @app_commands.command(name="warnings", description="See all warnings of a member (Admin)")
+    @app_commands.command(
+        name="warnings", description="See all warnings of a member (Admin)"
+    )
     @app_commands.checks.has_permissions(administrator=True)
     async def warnings(self, interaction: discord.Interaction, member: discord.Member):
         print_interaction_info(interaction)
@@ -135,8 +183,7 @@ class ModsCommand(commands.Cog):
         try:
             with closing(sqlite3.connect("Data/users.db")) as conn:
                 records = conn.execute(
-                    "SELECT reason, warner FROM warnings "
-                    "WHERE userid = ? ORDER BY id",
+                    "SELECT reason, warner FROM warnings WHERE userid = ? ORDER BY id",
                     (userid,),
                 ).fetchall()
         except sqlite3.Error as exc:
@@ -195,7 +242,9 @@ class ModsCommand(commands.Cog):
                 style=discord.ButtonStyle.secondary,
                 custom_id=f"warnings_previous_{interaction.id}",
             )
-            async def previous(self, inter: discord.Interaction, button: discord.Button):
+            async def previous(
+                self, inter: discord.Interaction, button: discord.Button
+            ):
                 if not await self.authorized(inter):
                     return
                 if self.page_index > 0:
@@ -227,15 +276,15 @@ class ModsCommand(commands.Cog):
                 style=discord.ButtonStyle.danger,
                 custom_id=f"clear_{userid}_{interaction.id}",
             )
-            async def clearwarnings(self, inter: discord.Interaction, button: discord.Button):
+            async def clearwarnings(
+                self, inter: discord.Interaction, button: discord.Button
+            ):
                 if not await self.authorized(inter):
                     return
 
                 try:
                     with closing(sqlite3.connect("Data/users.db")) as conn:
-                        conn.execute(
-                            "DELETE FROM warnings WHERE userid = ?", (userid,)
-                        )
+                        conn.execute("DELETE FROM warnings WHERE userid = ?", (userid,))
                         conn.commit()
                 except sqlite3.Error as exc:
                     print(exc)
@@ -258,7 +307,6 @@ class ModsCommand(commands.Cog):
         await interaction.followup.send(embed=warning_embed(0), view=ChoiceView())
         return
 
-
     @warnings.error
     async def catch(self, interaction, error):
         print(error)
@@ -274,7 +322,12 @@ class ModsCommand(commands.Cog):
 
     @app_commands.command(name="warn", description="Warn a member (Admin)")
     @app_commands.checks.has_permissions(administrator=True)
-    async def warn(self, interaction: discord.Interaction, member: discord.Member, reason: app_commands.Range[str, 1, 250] = None):
+    async def warn(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        reason: app_commands.Range[str, 1, 250] = None,
+    ):
         print_interaction_info(interaction)
 
         if member.avatar is None:
@@ -301,7 +354,6 @@ class ModsCommand(commands.Cog):
             )
             return
 
-
         class ChoiceView(discord.ui.View):
             def __init__(self):
                 super().__init__(timeout=None)
@@ -311,7 +363,9 @@ class ModsCommand(commands.Cog):
                 label="Undo",
                 custom_id=f"undo_{warning_id}_{interaction.id}",
             )
-            async def undowarning(self, inter: discord.Interaction, button: discord.Button):
+            async def undowarning(
+                self, inter: discord.Interaction, button: discord.Button
+            ):
                 if interaction.user.id != inter.user.id:
                     await respond_to_interaction(
                         inter,
@@ -323,9 +377,7 @@ class ModsCommand(commands.Cog):
                 await inter.response.defer()
                 try:
                     with closing(sqlite3.connect("Data/users.db")) as conn:
-                        conn.execute(
-                            "DELETE FROM warnings WHERE id = ?", (warning_id,)
-                        )
+                        conn.execute("DELETE FROM warnings WHERE id = ?", (warning_id,))
                         conn.commit()
                     await inter.message.delete()
                     return
@@ -336,7 +388,9 @@ class ModsCommand(commands.Cog):
                         ephemeral=True,
                     )
 
-        emb = discord.Embed(colour=discord.Colour.red(), timestamp=datetime.datetime.now())
+        emb = discord.Embed(
+            colour=discord.Colour.red(), timestamp=datetime.datetime.now()
+        )
         emb.set_author(name=f"Member Warned", icon_url=userpfp)
         emb.add_field(name="Who", value=member.mention, inline=False)
         emb.add_field(name="By", value=interaction.user.mention, inline=False)
@@ -344,7 +398,10 @@ class ModsCommand(commands.Cog):
         await interaction.response.send_message(embed=emb, view=ChoiceView())
 
         try:
-            emb = discord.Embed(description=f"You have been warned in **{interaction.guild.name}**", colour=discord.Colour.red())
+            emb = discord.Embed(
+                description=f"You have been warned in **{interaction.guild.name}**",
+                colour=discord.Colour.red(),
+            )
             emb.set_author(name=member, icon_url=userpfp)
             emb.add_field(name="Reason", value=reason, inline=False)
             await member.send(embed=emb)
@@ -352,7 +409,6 @@ class ModsCommand(commands.Cog):
             pass
 
         return
-
 
     @warn.error
     async def catch(self, interaction, error):
@@ -366,7 +422,6 @@ class ModsCommand(commands.Cog):
             message,
             ephemeral=True,
         )
-
 
     @app_commands.command(name="stats", description="Displays server stats")
     async def stats(self, interaction: discord.Interaction):
@@ -387,7 +442,11 @@ class ModsCommand(commands.Cog):
         owner = interaction.guild.owner.mention
         timer = int(str(interaction.guild.created_at.timestamp()).split(".")[0])
 
-        emb = discord.Embed(title=interaction.guild.name, colour=self.client.colour, timestamp=datetime.datetime.now())
+        emb = discord.Embed(
+            title=interaction.guild.name,
+            colour=self.client.colour,
+            timestamp=datetime.datetime.now(),
+        )
         emb.add_field(name="Online", value=online, inline=True)
         emb.add_field(name="Offline", value=offline, inline=True)
         emb.add_field(name="Bots", value=bots, inline=True)
@@ -396,7 +455,6 @@ class ModsCommand(commands.Cog):
         emb.add_field(name="Owner", value=owner, inline=False)
         await interaction.followup.send(embed=emb)
         return
-
 
     @stats.error
     async def catch(self, interaction, error):
@@ -407,8 +465,6 @@ class ModsCommand(commands.Cog):
             ephemeral=True,
         )
 
-
-
     @app_commands.command(name="lock", description="Lock a channel")
     @app_commands.checks.has_permissions(manage_channels=True)
     async def lock(self, interaction: discord.Interaction):
@@ -416,80 +472,120 @@ class ModsCommand(commands.Cog):
         await interaction.response.send_message(f"Locked {interaction.channel.mention}")
         overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
         overwrite.send_messages = False
-        await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
+        await interaction.channel.set_permissions(
+            interaction.guild.default_role, overwrite=overwrite
+        )
         return
-
-
 
     @app_commands.command(name="unlock", description="Unlock a channel")
     @app_commands.checks.has_permissions(manage_channels=True)
     async def unlock(self, interaction: discord.Interaction):
         print_interaction_info(interaction)
-        await interaction.response.send_message(f"Unlocked {interaction.channel.mention}")
+        await interaction.response.send_message(
+            f"Unlocked {interaction.channel.mention}"
+        )
         overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
         overwrite.send_messages = True
-        await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
+        await interaction.channel.set_permissions(
+            interaction.guild.default_role, overwrite=overwrite
+        )
         return
-
 
     @app_commands.command(name="purge", description="Purge messages")
     @app_commands.checks.has_permissions(manage_messages=True)
-    async def purge(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1, 100000]):
+    @app_commands.checks.bot_has_permissions(manage_messages=True)
+    @app_commands.checks.cooldown(
+        1, 30.0, key=lambda interaction: (interaction.guild_id, interaction.user.id)
+    )
+    async def purge(
+        self,
+        interaction: discord.Interaction,
+        amount: app_commands.Range[int, 1, MAX_PURGE_MESSAGES],
+    ):
         print_interaction_info(interaction)
-        await interaction.response.send_message(f"Purging **{amount}** messages")
-        await interaction.channel.purge(limit=amount+1)
+        if purge_requires_confirmation(amount):
+            confirmed = await confirm_destructive_action(
+                interaction,
+                f"Delete up to **{amount}** messages from {interaction.channel.mention}?",
+            )
+            if not confirmed:
+                return
+        else:
+            await interaction.response.defer(ephemeral=True)
+        deleted = await interaction.channel.purge(limit=amount)
+        await interaction.followup.send(
+            f"Deleted **{len(deleted)}** message(s).",
+            ephemeral=True,
+        )
         return
-
-
 
     @app_commands.command(name="nuke", description="Nuke")
     @app_commands.checks.has_permissions(manage_channels=True)
+    @app_commands.checks.bot_has_permissions(manage_channels=True)
+    @app_commands.checks.cooldown(
+        1, 60.0, key=lambda interaction: (interaction.guild_id, interaction.user.id)
+    )
     async def nuke(self, interaction: discord.Interaction):
         print_interaction_info(interaction)
-        await interaction.response.send_message(f"Nuking this channel...")
+        confirmed = await confirm_destructive_action(
+            interaction,
+            f"Permanently recreate {interaction.channel.mention} and delete its message history?",
+        )
+        if not confirmed:
+            return
         chanpos = interaction.channel.position
         newchan = await interaction.channel.clone()
         await interaction.channel.delete()
         await newchan.edit(position=chanpos, sync_permissions=True)
-        await newchan.send(f"Channel nuked by {interaction.user.mention}", delete_after=5)
+        await newchan.send(
+            f"Channel nuked by {interaction.user.mention}", delete_after=5
+        )
         return
-
-
 
     @app_commands.command(name="timeout", description="Timeout a member")
     @app_commands.checks.has_permissions(moderate_members=True)
-    async def timeout(self, interaction: discord.Interaction, member: discord.Member, minutes: app_commands.Range[int, 1, 40320]):
+    async def timeout(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        minutes: app_commands.Range[int, 1, 40320],
+    ):
         print_interaction_info(interaction)
-        then = datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(minutes=minutes)
+        then = datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(
+            minutes=minutes
+        )
 
         await member.timeout(then)
-        await interaction.response.send_message(f"{member.mention} has been timed out for **{minutes}** minutes.")
+        await interaction.response.send_message(
+            f"{member.mention} has been timed out for **{minutes}** minutes."
+        )
         return
-
 
     @app_commands.command(name="untimeout", description="Remove a timeout of a member")
     @app_commands.checks.has_permissions(moderate_members=True)
     async def untimeout(self, interaction: discord.Interaction, member: discord.Member):
         print_interaction_info(interaction)
-        then = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(minutes=1)
+        then = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(
+            minutes=1
+        )
         await member.timeout(then)
-        await interaction.response.send_message(f"{member.mention} is not timed out anymore.")
+        await interaction.response.send_message(
+            f"{member.mention} is not timed out anymore."
+        )
         return
-
-
 
     @app_commands.command(name="unmute", description="Unmute a member")
     @app_commands.checks.has_permissions(manage_roles=True)
     async def unmute(self, interaction: discord.Interaction, member: discord.Member):
         print_interaction_info(interaction)
         if member.id == interaction.user.id:
-            await interaction.response.send_message("You can't unmute yourself", ephemeral=True)
+            await interaction.response.send_message(
+                "You can't unmute yourself", ephemeral=True
+            )
             return
 
         await interaction.response.defer()
-        roles = [
-            role for role in member.roles if role.name.casefold() == "muted"
-        ]
+        roles = [role for role in member.roles if role.name.casefold() == "muted"]
         if not roles:
             await interaction.followup.send(f"{member.mention} is not muted.")
             return
@@ -503,9 +599,7 @@ class ModsCommand(commands.Cog):
             return
 
         try:
-            await member.remove_roles(
-                *roles, reason=f"Unmuted by {interaction.user}"
-            )
+            await member.remove_roles(*roles, reason=f"Unmuted by {interaction.user}")
         except Exception as exc:
             print(exc)
             await interaction.followup.send(
@@ -517,7 +611,6 @@ class ModsCommand(commands.Cog):
 
         await interaction.followup.send(f"{member.mention} has been unmuted.")
         return
-
 
     @unmute.error
     async def catch(self, interaction, error):
@@ -535,13 +628,14 @@ class ModsCommand(commands.Cog):
             ephemeral=True,
         )
 
-
     @app_commands.command(name="mute", description="Mute a member")
     @app_commands.checks.has_permissions(manage_roles=True)
     async def mute(self, interaction: discord.Interaction, member: discord.Member):
         print_interaction_info(interaction)
         if member.id == interaction.user.id:
-            await interaction.response.send_message("You can't mute yourself", ephemeral=True)
+            await interaction.response.send_message(
+                "You can't mute yourself", ephemeral=True
+            )
             return
 
         await interaction.response.defer()
@@ -613,8 +707,7 @@ class ModsCommand(commands.Cog):
             message = "You need Manage Roles permission to mute members."
         else:
             message = (
-                "Could not complete that mute. Check my role position and "
-                "permissions."
+                "Could not complete that mute. Check my role position and permissions."
             )
         await respond_to_interaction(
             interaction,
@@ -622,25 +715,32 @@ class ModsCommand(commands.Cog):
             ephemeral=True,
         )
 
-
     @app_commands.command(name="ban", description="Ban a member")
     @app_commands.checks.has_permissions(ban_members=True)
-    async def ban(self, interaction: discord.Interaction, member: discord.Member, reason: str = None):
+    async def ban(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        reason: str = None,
+    ):
         print_interaction_info(interaction)
         if member.id == interaction.user.id:
-            await interaction.response.send_message("You can't ban yourself", ephemeral=True)
+            await interaction.response.send_message(
+                "You can't ban yourself", ephemeral=True
+            )
             return
         await interaction.guild.ban(member, reason=reason)
         await interaction.response.send_message(f"{member.mention} has been banned.")
         return
-
 
     @app_commands.command(name="unban", description="Unban a member")
     @app_commands.checks.has_permissions(ban_members=True)
     async def unban(self, interaction: discord.Interaction, member: discord.User):
         print_interaction_info(interaction)
         if member.id == interaction.user.id:
-            await interaction.response.send_message("You can't unban yourself", ephemeral=True)
+            await interaction.response.send_message(
+                "You can't unban yourself", ephemeral=True
+            )
             return
 
         await interaction.guild.unban(member)
@@ -650,47 +750,60 @@ class ModsCommand(commands.Cog):
     @unban.error
     async def catch(self, interaction, error):
         print(error)
-        raise(error)
-
+        raise (error)
 
     @app_commands.command(name="kick", description="Kick a member")
     @app_commands.checks.has_permissions(kick_members=True)
-    async def kick(self, interaction: discord.Interaction, member: discord.Member, reason: str = None):
+    async def kick(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        reason: str = None,
+    ):
         print_interaction_info(interaction)
         if member.id == interaction.user.id:
-            await interaction.response.send_message("You can't kick yourself", ephemeral=True)
+            await interaction.response.send_message(
+                "You can't kick yourself", ephemeral=True
+            )
             return
         await interaction.guild.kick(member, reason=reason)
         await interaction.response.send_message(f"{member.mention} has been kicked.")
         return
 
-
     @untimeout.error
     async def catch(self, interaction, error):
-        await interaction.response.send_message(f"Error, I probably don't have permissions to do that.")
+        await interaction.response.send_message(
+            f"Error, I probably don't have permissions to do that."
+        )
         return
 
     @timeout.error
     async def catch(self, interaction, error):
-        await interaction.response.send_message(f"Error, I probably don't have permissions to do that.")
+        await interaction.response.send_message(
+            f"Error, I probably don't have permissions to do that."
+        )
         return
 
     @unban.error
     async def catch(self, interaction, error):
-        await interaction.response.send_message(f"Error, I probably don't have permissions to do that.")
+        await interaction.response.send_message(
+            f"Error, I probably don't have permissions to do that."
+        )
         return
 
     @ban.error
     async def catch(self, interaction, error):
-        await interaction.response.send_message(f"Error, I probably don't have permissions to do that.")
+        await interaction.response.send_message(
+            f"Error, I probably don't have permissions to do that."
+        )
         return
-
 
     @kick.error
     async def catch(self, interaction, error):
-        await interaction.response.send_message(f"Error, I probably don't have permissions to do that.")
+        await interaction.response.send_message(
+            f"Error, I probably don't have permissions to do that."
+        )
         return
-
 
 
 async def setup(client):

@@ -43,23 +43,23 @@ class ModmailDeleteView(discord.ui.View):
 conn = sqlite3.connect(STICKY_DB_PATH)
 cursor = conn.cursor()
 
-cursor.execute('''
+cursor.execute("""
     CREATE TABLE IF NOT EXISTS infos_salos (
         id_salon INTEGER PRIMARY KEY,
         contenu TEXT,
         message_limit INTEGER
     )
-''')
+""")
 
 conn.commit()
 conn.close()
+
 
 class MembersCommand(commands.Cog):
     def __init__(self, client):
         self.client = client
         self._last_modmail_warning = None
         self._modmail_locks = {}
-
 
     def connect(self):
         try:
@@ -125,7 +125,6 @@ class MembersCommand(commands.Cog):
                         )
                     )
         return view, removed
-
 
     # MODMAIL
 
@@ -237,7 +236,9 @@ class MembersCommand(commands.Cog):
             ("embed_links", "Embed Links"),
         )
         missing = [
-            label for attribute, label in required if not getattr(permissions, attribute)
+            label
+            for attribute, label in required
+            if not getattr(permissions, attribute)
         ]
         if require_attachments and not permissions.attach_files:
             missing.append("Attach Files")
@@ -327,9 +328,7 @@ class MembersCommand(commands.Cog):
                         message,
                         title="New Modmail" if created else "Modmail Reply",
                         colour=(
-                            discord.Colour.blue()
-                            if created
-                            else discord.Colour.green()
+                            discord.Colour.blue() if created else discord.Colour.green()
                         ),
                         failed_attachments=fallback_links,
                     )
@@ -340,7 +339,9 @@ class MembersCommand(commands.Cog):
                     )
                 if created:
                     try:
-                        await mirrored.pin(reason="Project L modmail conversation start")
+                        await mirrored.pin(
+                            reason="Project L modmail conversation start"
+                        )
                     except (discord.Forbidden, discord.HTTPException):
                         pass
         except (discord.Forbidden, discord.HTTPException) as exc:
@@ -438,28 +439,60 @@ class MembersCommand(commands.Cog):
         except Exception:
             print("[!] Unexpected modmail error:\n" + traceback.format_exc())
 
-
-
     class SelectD(discord.ui.Select):
         def __init__(self):
             options = [
-                discord.SelectOption(label="Economy commands", description="Shows all the economy commands"),
-                discord.SelectOption(label="Invites commands", description="Shows all the economy commands"),
-                discord.SelectOption(label="Fun commands", description="Shows all the economy commands"),
-                discord.SelectOption(label="Giveaways commands", description="Shows all the economy commands"),
-                discord.SelectOption(label="Moderation commands", description="Shows all the economy commands"),
-                discord.SelectOption(label="Admin commands", description="Shows all the economy commands"),
-                discord.SelectOption(label="Giveaways commands", description="Shows all the economy commands")
+                discord.SelectOption(
+                    label="Economy commands",
+                    description="Shows all the economy commands",
+                ),
+                discord.SelectOption(
+                    label="Invites commands",
+                    description="Shows all the economy commands",
+                ),
+                discord.SelectOption(
+                    label="Fun commands", description="Shows all the economy commands"
+                ),
+                discord.SelectOption(
+                    label="Giveaways commands",
+                    description="Shows all the economy commands",
+                ),
+                discord.SelectOption(
+                    label="Moderation commands",
+                    description="Shows all the economy commands",
+                ),
+                discord.SelectOption(
+                    label="Admin commands", description="Shows all the economy commands"
+                ),
+                discord.SelectOption(
+                    label="Giveaways commands",
+                    description="Shows all the economy commands",
+                ),
             ]
-            super().__init__(placeholder="Which help section do you want ?", min_values=1, max_values=1, options=options)
+            super().__init__(
+                placeholder="Which help section do you want ?",
+                min_values=1,
+                max_values=1,
+                options=options,
+            )
 
         async def callback(self, interaction: discord.Interaction):
-            await interaction.response.send_message("You selected: " + self.values[0], ephemeral=True)
-
+            await interaction.response.send_message(
+                "You selected: " + self.values[0], ephemeral=True
+            )
 
     @app_commands.command(name="say", description="Say something as the bot")
     @app_commands.checks.has_permissions(manage_messages=True)
-    async def say(self, interaction: discord.Interaction, channel: discord.TextChannel, *, title: str = None, message: str = None, link: str = None, img: discord.Attachment = None):
+    async def say(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        *,
+        title: str = None,
+        message: str = None,
+        link: str = None,
+        img: discord.Attachment = None,
+    ):
         print_interaction_info(interaction)
         await interaction.response.defer(ephemeral=True)
         title_text = f"👑 {title} 👑" if title else "Default title"
@@ -508,15 +541,24 @@ class MembersCommand(commands.Cog):
 
         await interaction.followup.send("Sent!", ephemeral=True)
 
-
     dico = {}
 
     @app_commands.command(name="addbutton", description="Add a button to a message")
     @app_commands.checks.has_permissions(manage_roles=True)
-    async def addbutton(self, interaction: discord.Interaction, messageid: str, content: str, emoji: str, role: discord.Role=None,link:str=None):
+    async def addbutton(
+        self,
+        interaction: discord.Interaction,
+        messageid: str,
+        content: str,
+        emoji: str,
+        role: discord.Role = None,
+        link: str = None,
+    ):
         print_interaction_info(interaction)
         if link is None and role is None:
-            return await interaction.response.send_message("Select a role/link.", ephemeral=True)
+            return await interaction.response.send_message(
+                "Select a role/link.", ephemeral=True
+            )
         if not content or len(content) > 80:
             return await interaction.response.send_message(
                 "Button labels must contain 1 to 80 characters.", ephemeral=True
@@ -570,16 +612,26 @@ class MembersCommand(commands.Cog):
             else:
                 await message.edit(view=view)
             await interaction.followup.send("Button added!", ephemeral=True)
-        except (TypeError, ValueError, sqlite3.Error, discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
+        except (
+            TypeError,
+            ValueError,
+            sqlite3.Error,
+            discord.NotFound,
+            discord.Forbidden,
+            discord.HTTPException,
+        ) as exc:
             print(f"[!] /addbutton failed: {exc}")
             await interaction.followup.send(
                 f"Could not add the button: {exc}", ephemeral=True
             )
 
-
-    @app_commands.command(name="removebuttons", description="Remove buttons from a message")
+    @app_commands.command(
+        name="removebuttons", description="Remove buttons from a message"
+    )
     @app_commands.checks.has_permissions(manage_roles=True)
-    async def removebuttons(self, interaction: discord.Interaction, messageid: str, content: str):
+    async def removebuttons(
+        self, interaction: discord.Interaction, messageid: str, content: str
+    ):
         print_interaction_info(interaction)
         await interaction.response.defer(ephemeral=True)
         try:
@@ -600,7 +652,14 @@ class MembersCommand(commands.Cog):
                     (messageid, content),
                 )
             await interaction.followup.send("Button removed!", ephemeral=True)
-        except (TypeError, ValueError, sqlite3.Error, discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
+        except (
+            TypeError,
+            ValueError,
+            sqlite3.Error,
+            discord.NotFound,
+            discord.Forbidden,
+            discord.HTTPException,
+        ) as exc:
             print(f"[!] /removebuttons failed: {exc}")
             await interaction.followup.send(
                 f"Could not remove the button: {exc}", ephemeral=True
@@ -612,13 +671,39 @@ class MembersCommand(commands.Cog):
         select = Select(
             placeholder="Which help section do you want ?",
             options=[
-                SelectOption(label="📈 Economy commands", description="Shows all the economy commands", value="1"),
-                SelectOption(label="📢 Invites commands", description="Shows all the economy commands", value="2"),
-                SelectOption(label="🎉 Fun commands", description="Shows all the economy commands", value="3"),
-                SelectOption(label="🎁 Giveaways commands", description="Shows all the economy commands", value="4"),
-                SelectOption(label="🔨 Moderation commands", description="Shows all the economy commands", value="5"),
-                SelectOption(label="🔒 Admin commands", description="Shows all the economy commands", value="6"),
-            ])
+                SelectOption(
+                    label="📈 Economy commands",
+                    description="Shows all the economy commands",
+                    value="1",
+                ),
+                SelectOption(
+                    label="📢 Invites commands",
+                    description="Shows all the economy commands",
+                    value="2",
+                ),
+                SelectOption(
+                    label="🎉 Fun commands",
+                    description="Shows all the economy commands",
+                    value="3",
+                ),
+                SelectOption(
+                    label="🎁 Giveaways commands",
+                    description="Shows all the economy commands",
+                    value="4",
+                ),
+                SelectOption(
+                    label="🔨 Moderation commands",
+                    description="Shows all the economy commands",
+                    value="5",
+                ),
+                SelectOption(
+                    label="🔒 Admin commands",
+                    description="Shows all the economy commands",
+                    value="6",
+                ),
+            ],
+        )
+
         async def callback(interaction):
             if select.values[0] == "1":
                 await interaction.response.edit_message(embed=eco_embed, view=None)
@@ -635,40 +720,126 @@ class MembersCommand(commands.Cog):
 
         select.callback = callback
 
-        embed = discord.Embed(title="Help", colour=self.client.colour, description="Select a category to see the commands")
+        embed = discord.Embed(
+            title="Help",
+            colour=self.client.colour,
+            description="Select a category to see the commands",
+        )
 
-        eco_embed = discord.Embed(title="Economy", colour=self.client.colour, description="Here are all the economy commands").add_field(name="Balance", value="`/balance`", inline=False).add_field(name="Leaderboard", value="`/leaderboard`", inline=False).add_field(name="Daily", value="`/daily`", inline=False).add_field(name="Work", value="`/work`", inline=False).add_field(name="Rob", value="`/rob`", inline=False).add_field(name="Bet", value="`/bet`", inline=False).add_field(name="Crash", value="`/crash`", inline=False).add_field(name="Dice", value="`/dice`", inline=False).add_field(name="Send", value="`/send`", inline=False).add_field(name="Addmoney", value="`/addmoney`", inline=False).add_field(name="Removemoney", value="`/removemoney`", inline=False)
-        invite_embed = discord.Embed(title="Invites", colour=self.client.colour, description="Here are all the invites commands").add_field(name="Invites", value="`/invites`", inline=False)
-        fun_embed = discord.Embed(title="Fun", colour=self.client.colour, description="Here are all the fun commands").add_field(name="Coinflip", value="`/coinflip`", inline=False).add_field(name="RPS", value="`/rps`", inline=False).add_field(name="Play", value="`/play`", inline=False).add_field(name="Stop", value="`/stop`", inline=False).add_field(name="Join", value="`/join`", inline=False)
-        give_embed = discord.Embed(title="Giveaways", colour=self.client.colour, description="Here are all the giveaways commands").add_field(name="Giveaway", value="`/giveaway`", inline=False).add_field(name="End", value="`/end`", inline=False).add_field(name="Reroll", value="`/reroll`", inline=False)
-        mod_embed = discord.Embed(title="Moderation", colour=self.client.colour, description="Here are all the moderation commands").add_field(name="Ban", value="`/ban`", inline=False).add_field(name="Kick", value="`/kick`", inline=False).add_field(name="Unban", value="`/unban`", inline=False).add_field(name="Mute", value="`/mute`", inline=False).add_field(name="Unmute", value="`/unmute`", inline=False).add_field(name="Nuke", value="`/nuke`", inline=False).add_field(name="Purge", value="`/purge`", inline=False).add_field(name="Lock", value="`/lock`", inline=False).add_field(name="Unlock", value="`/unlock`", inline=False).add_field(name="Warn", value="`/warn`", inline=False).add_field(name="Warnings", value="`/warnings`", inline=False).add_field(name="Sticky", value="`/sticky`", inline=False).add_field(name="Unsticky", value="`/unsticky`", inline=False)
-        admin_embed = discord.Embed(title="Admin", colour=self.client.colour, description="Here are all the admin commands").add_field(name="Steal", value="`/steal`", inline=False).add_field(name="Ticketpanel", value="`/ticketpanel`", inline=False).add_field(name="Verifypanel", value="`/verifypanel`", inline=False).add_field(name="Reactionroles", value="`/reactionroles`", inline=False).add_field(name="Voicepanel", value="`/voicepanel`", inline=False).add_field(name="Stats", value="`/stats`", inline=False)
+        eco_embed = (
+            discord.Embed(
+                title="Economy",
+                colour=self.client.colour,
+                description="Here are all the economy commands",
+            )
+            .add_field(name="Balance", value="`/balance`", inline=False)
+            .add_field(name="Leaderboard", value="`/leaderboard`", inline=False)
+            .add_field(name="Daily", value="`/daily`", inline=False)
+            .add_field(name="Work", value="`/work`", inline=False)
+            .add_field(name="Rob", value="`/rob`", inline=False)
+            .add_field(name="Bet", value="`/bet`", inline=False)
+            .add_field(name="Crash", value="`/crash`", inline=False)
+            .add_field(name="Dice", value="`/dice`", inline=False)
+            .add_field(name="Send", value="`/send`", inline=False)
+            .add_field(name="Addmoney", value="`/addmoney`", inline=False)
+            .add_field(name="Removemoney", value="`/removemoney`", inline=False)
+        )
+        invite_embed = discord.Embed(
+            title="Invites",
+            colour=self.client.colour,
+            description="Here are all the invites commands",
+        ).add_field(name="Invites", value="`/invites`", inline=False)
+        fun_embed = (
+            discord.Embed(
+                title="Fun",
+                colour=self.client.colour,
+                description="Here are all the fun commands",
+            )
+            .add_field(name="Coinflip", value="`/coinflip`", inline=False)
+            .add_field(name="RPS", value="`/rps`", inline=False)
+            .add_field(name="Play", value="`/play`", inline=False)
+            .add_field(name="Stop", value="`/stop`", inline=False)
+            .add_field(name="Join", value="`/join`", inline=False)
+        )
+        give_embed = (
+            discord.Embed(
+                title="Giveaways",
+                colour=self.client.colour,
+                description="Here are all the giveaways commands",
+            )
+            .add_field(name="Giveaway", value="`/giveaway`", inline=False)
+            .add_field(name="End", value="`/end`", inline=False)
+            .add_field(name="Reroll", value="`/reroll`", inline=False)
+        )
+        mod_embed = (
+            discord.Embed(
+                title="Moderation",
+                colour=self.client.colour,
+                description="Here are all the moderation commands",
+            )
+            .add_field(name="Ban", value="`/ban`", inline=False)
+            .add_field(name="Kick", value="`/kick`", inline=False)
+            .add_field(name="Unban", value="`/unban`", inline=False)
+            .add_field(name="Mute", value="`/mute`", inline=False)
+            .add_field(name="Unmute", value="`/unmute`", inline=False)
+            .add_field(name="Nuke", value="`/nuke`", inline=False)
+            .add_field(name="Purge", value="`/purge`", inline=False)
+            .add_field(name="Lock", value="`/lock`", inline=False)
+            .add_field(name="Unlock", value="`/unlock`", inline=False)
+            .add_field(name="Warn", value="`/warn`", inline=False)
+            .add_field(name="Warnings", value="`/warnings`", inline=False)
+            .add_field(name="Sticky", value="`/sticky`", inline=False)
+            .add_field(name="Unsticky", value="`/unsticky`", inline=False)
+        )
+        admin_embed = (
+            discord.Embed(
+                title="Admin",
+                colour=self.client.colour,
+                description="Here are all the admin commands",
+            )
+            .add_field(name="Steal", value="`/steal`", inline=False)
+            .add_field(name="Ticketpanel", value="`/ticketpanel`", inline=False)
+            .add_field(name="Verifypanel", value="`/verifypanel`", inline=False)
+            .add_field(name="Reactionroles", value="`/reactionroles`", inline=False)
+            .add_field(name="Voicepanel", value="`/voicepanel`", inline=False)
+            .add_field(name="Stats", value="`/stats`", inline=False)
+        )
 
         async def callback_1(interaction):
             await interaction.response.edit_message(embed=eco_embed, view=view1)
+
         async def callback_2(interaction):
             await interaction.response.edit_message(embed=embed, view=view)
+
         async def callback_3(interaction):
             await interaction.response.edit_message(embed=invite_embed, view=view2)
+
         async def callback_4(interaction):
             await interaction.response.edit_message(embed=eco_embed, view=view1)
+
         async def callback_5(interaction):
             await interaction.response.edit_message(embed=fun_embed, view=view3)
+
         async def callback_6(interaction):
             await interaction.response.edit_message(embed=invite_embed, view=view2)
+
         async def callback_7(interaction):
             await interaction.response.edit_message(embed=give_embed, view=view4)
+
         async def callback_8(interaction):
             await interaction.response.edit_message(embed=fun_embed, view=view3)
+
         async def callback_9(interaction):
             await interaction.response.edit_message(embed=mod_embed, view=view5)
+
         async def callback_10(interaction):
             await interaction.response.edit_message(embed=give_embed, view=view4)
+
         async def callback_11(interaction):
             await interaction.response.edit_message(embed=admin_embed, view=view6)
+
         async def callback_12(interaction):
             await interaction.response.edit_message(embed=mod_embed, view=view5)
-
 
         view = View()
         next = Button(label="Next", style=discord.ButtonStyle.green)
@@ -723,28 +894,29 @@ class MembersCommand(commands.Cog):
         select_view = View()
         select_view.add_item(select)
 
-
-
-
-
-
         await interaction.response.send_message(embed=embed, view=select_view)
         return
 
-
-    @app_commands.command(name="unsticky", description="Remove a stickied message (Admin)")
+    @app_commands.command(
+        name="unsticky", description="Remove a stickied message (Admin)"
+    )
     @app_commands.checks.has_permissions(manage_messages=True)
     async def unsticky(self, interaction: discord.Interaction):
         print_interaction_info(interaction)
         if interaction.channel.id not in self.client.sticky:
-            await interaction.response.send_message(f"🗂️ There is no stickied message here.")
+            await interaction.response.send_message(
+                f"🗂️ There is no stickied message here."
+            )
             return
         else:
-            conn = sqlite3.connect('sticky.db')
+            conn = sqlite3.connect("sticky.db")
             cursor = conn.cursor()
-            cursor.execute('SELECT * from infos_salos')
+            cursor.execute("SELECT * from infos_salos")
             rows = cursor.fetchall()
-            cursor.execute('SELECT * FROM infos_salos WHERE id_salon = ?', (interaction.channel.id,))
+            cursor.execute(
+                "SELECT * FROM infos_salos WHERE id_salon = ?",
+                (interaction.channel.id,),
+            )
             existing_entry = cursor.fetchone()
             if existing_entry is None:
                 conn.close()
@@ -761,9 +933,12 @@ class MembersCommand(commands.Cog):
                 )
                 return
             if existing_entry[1] != "":
-            # Mettre à jour l'entrée existante
-                cursor.execute('UPDATE infos_salos SET contenu = "" , message_limit = "" WHERE id_salon = ?', (interaction.channel.id,))
-                cursor.execute('SELECT * from infos_salos')
+                # Mettre à jour l'entrée existante
+                cursor.execute(
+                    'UPDATE infos_salos SET contenu = "" , message_limit = "" WHERE id_salon = ?',
+                    (interaction.channel.id,),
+                )
+                cursor.execute("SELECT * from infos_salos")
                 rows = cursor.fetchall()
                 # print(rows)
                 conn.commit()
@@ -772,10 +947,14 @@ class MembersCommand(commands.Cog):
                 await interaction.response.send_message(f"🗂️ Unstickied the message.")
                 return
 
-
     @app_commands.command(name="sticky", description="Sticky a message (Admin)")
     @app_commands.checks.has_permissions(manage_messages=True)
-    async def sticky(self, interaction: discord.Interaction,messagelimit: app_commands.Range[int, 1, 100], member: discord.Member = None,):
+    async def sticky(
+        self,
+        interaction: discord.Interaction,
+        messagelimit: app_commands.Range[int, 1, 100],
+        member: discord.Member = None,
+    ):
         print_interaction_info(interaction)
         member = interaction.user if member is None else member
         lastmsg = None
@@ -784,47 +963,61 @@ class MembersCommand(commands.Cog):
                 lastmsg = msg
                 break
 
-
         if not lastmsg:
-            await interaction.response.send_message("No message to stick.", ephemeral=True)
+            await interaction.response.send_message(
+                "No message to stick.", ephemeral=True
+            )
             return
 
-        sticky_object = {
-            'content': lastmsg.content,
-            'messageLimit': messagelimit
-        }
+        sticky_object = {"content": lastmsg.content, "messageLimit": messagelimit}
 
-
-
-        conn = sqlite3.connect('sticky.db')
+        conn = sqlite3.connect("sticky.db")
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM infos_salos WHERE id_salon = ?', (interaction.channel.id,))
+        cursor.execute(
+            "SELECT * FROM infos_salos WHERE id_salon = ?", (interaction.channel.id,)
+        )
         existing_entry = cursor.fetchone()
         # print(existing_entry)
         if existing_entry:
-        # Mettre à jour l'entrée existante
-            cursor.execute('UPDATE infos_salos SET contenu = ?, message_limit = ? WHERE id_salon = ?',(sticky_object['content'], sticky_object['messageLimit'], interaction.channel.id))
+            # Mettre à jour l'entrée existante
+            cursor.execute(
+                "UPDATE infos_salos SET contenu = ?, message_limit = ? WHERE id_salon = ?",
+                (
+                    sticky_object["content"],
+                    sticky_object["messageLimit"],
+                    interaction.channel.id,
+                ),
+            )
             # cursor.execute('UPDATE infos_salons SET contenu = ? WHERE id_salon = ?', (lastmsg.content, interaction.channel.id))
         else:
             # Ajouter une nouvelle entrée
-            cursor.execute('INSERT INTO infos_salos (id_salon, contenu, message_limit) VALUES (?, ?, ?)',(interaction.channel.id, sticky_object['content'], sticky_object['messageLimit']))
+            cursor.execute(
+                "INSERT INTO infos_salos (id_salon, contenu, message_limit) VALUES (?, ?, ?)",
+                (
+                    interaction.channel.id,
+                    sticky_object["content"],
+                    sticky_object["messageLimit"],
+                ),
+            )
 
             # cursor.execute('INSERT INTO infos_salons (id_salon, contenu) VALUES (?, ?)', (interaction.channel.id, lastmsg.content))
         conn.commit()
         conn.close()
 
-
         @tasks.loop(seconds=12)
         async def stickyloop(channel: discord.TextChannel, sticky_object: dict):
-            message, message_limit = sticky_object['content'], sticky_object['messageLimit']
+            message, message_limit = (
+                sticky_object["content"],
+                sticky_object["messageLimit"],
+            )
             # print(message)
             # print(message_limit)
             if channel.id not in self.client.sticky:
                 stickyloop.stop()
                 return
 
-            elif self.client.sticky[channel.id]['content'] != message:
-                print('stopping loop')
+            elif self.client.sticky[channel.id]["content"] != message:
+                print("stopping loop")
                 stickyloop.stop()
                 return
 
@@ -835,10 +1028,9 @@ class MembersCommand(commands.Cog):
             if message not in msgz:
                 await channel.send(f"{message}")
 
-
         self.client.sticky[interaction.channel.id] = sticky_object
         stickyloop.start(interaction.channel, sticky_object)
-        conn = sqlite3.connect('sticky.db')
+        conn = sqlite3.connect("sticky.db")
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM infos_salos")
         rows = cursor.fetchall()
@@ -849,16 +1041,11 @@ class MembersCommand(commands.Cog):
         await interaction.response.send_message(f"🗂️ Stickied.")
         return
 
-
-
-
-
-
     @app_commands.command(name="coinflip", description="Play coinflip with the bot")
-    #@app_commands.choices(choice=[
-        #app_commands.Choice(name="Heads", value="Heads"),
-       # app_commands.Choice(name="Tails", value="Tails"),
-    #])
+    # @app_commands.choices(choice=[
+    # app_commands.Choice(name="Heads", value="Heads"),
+    # app_commands.Choice(name="Tails", value="Tails"),
+    # ])
     async def coinflip(self, interaction: discord.Interaction):
         print_interaction_info(interaction)
         if interaction.user.avatar is None:
@@ -869,24 +1056,28 @@ class MembersCommand(commands.Cog):
         choices = ["heads", "tails"]
         choice = random.choice(choices)
 
-        emb = discord.Embed(colour=discord.Colour.blue())
+        coin = "🪙"
+        emb = discord.Embed(
+            description=f"{coin} **{choice.upper()}**",
+            colour=discord.Colour.blue(),
+        )
         emb.set_author(name=f"{choice.capitalize()}!", icon_url=userpfp)
-        if choice == "heads":
-            emb.set_image(url="https://i.ibb.co/rHtXXz0/heads-coinflip-1.gif")
-        else:
-            emb.set_image(url="https://i.ibb.co/DkvgBCt/coins-tails.gif")
         await interaction.response.send_message(embed=emb)
         return
 
-
-
-    @app_commands.command(name="rps", description="Play rock/paper/scissors with the bot")
-    @app_commands.choices(choice=[
-        app_commands.Choice(name="Rock", value="Rock"),
-        app_commands.Choice(name="Paper", value="Paper"),
-        app_commands.Choice(name="Scissors", value="Scissors")
-    ])
-    async def rps(self, interaction: discord.Interaction, choice: app_commands.Choice[str]):
+    @app_commands.command(
+        name="rps", description="Play rock/paper/scissors with the bot"
+    )
+    @app_commands.choices(
+        choice=[
+            app_commands.Choice(name="Rock", value="Rock"),
+            app_commands.Choice(name="Paper", value="Paper"),
+            app_commands.Choice(name="Scissors", value="Scissors"),
+        ]
+    )
+    async def rps(
+        self, interaction: discord.Interaction, choice: app_commands.Choice[str]
+    ):
         print_interaction_info(interaction)
         if interaction.user.avatar is None:
             userpfp = interaction.user.default_avatar
@@ -898,47 +1089,73 @@ class MembersCommand(commands.Cog):
         choices = ["rock", "paper", "scissors"]
         choice = choice.value.lower()
         botchoice = random.choice(choices)
-        yourem = choice.replace("rock", "🪨").replace("paper", "📜").replace("scissors", "✂️")
-        botem = botchoice.replace("rock", "🪨").replace("paper", "📜").replace("scissors", "✂️")
+        yourem = (
+            choice.replace("rock", "🪨").replace("paper", "📜").replace("scissors", "✂️")
+        )
+        botem = (
+            botchoice.replace("rock", "🪨")
+            .replace("paper", "📜")
+            .replace("scissors", "✂️")
+        )
         if choice == botchoice:
-            emb = discord.Embed(title="Draw!", description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}", colour=discord.Colour.grey())
-            #emb.set_image(url="https://giphy.com/embed/3oEjHVNeiP3utYQyoE")
+            emb = discord.Embed(
+                title="Draw!",
+                description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}",
+                colour=discord.Colour.grey(),
+            )
             await interaction.response.send_message(embed=emb)
             return
         elif choice == "rock":
             if botchoice == "paper":
-                emb = discord.Embed(title="You lost!", description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}", colour=discord.Colour.red())
-                #emb.set_image(url="https://giphy.com/embed/3oEjHVNeiP3utYQyoE")
+                emb = discord.Embed(
+                    title="You lost!",
+                    description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}",
+                    colour=discord.Colour.red(),
+                )
                 await interaction.response.send_message(embed=emb)
                 return
             elif botchoice == "scissors":
-                emb = discord.Embed(title="You win!", description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}", colour=self.client.colour)
-                #emb.set_image(url="https://giphy.com/embed/3oEjHVNeiP3utYQyoE")
+                emb = discord.Embed(
+                    title="You win!",
+                    description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}",
+                    colour=self.client.colour,
+                )
                 await interaction.response.send_message(embed=emb)
                 return
         elif choice == "paper":
             if botchoice == "scissors":
-                emb = discord.Embed(title="You lost!", description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}", colour=discord.Colour.red())
-                #emb.set_image(url="https://giphy.com/embed/3oEjHVNeiP3utYQyoE")
+                emb = discord.Embed(
+                    title="You lost!",
+                    description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}",
+                    colour=discord.Colour.red(),
+                )
                 await interaction.response.send_message(embed=emb)
                 return
             elif botchoice == "rock":
-                emb = discord.Embed(title="You win!", description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}", colour=self.client.colour)
-                #emb.set_image(url="https://giphy.com/embed/3oEjHVNeiP3utYQyoE")
+                emb = discord.Embed(
+                    title="You win!",
+                    description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}",
+                    colour=self.client.colour,
+                )
                 await interaction.response.send_message(embed=emb)
                 return
         elif choice == "scissors":
             if botchoice == "rock":
-                emb = discord.Embed(title="You lost!", description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}", colour=discord.Colour.red())
-                #emb.set_image(url="https://giphy.com/embed/3oEjHVNeiP3utYQyoE")
+                emb = discord.Embed(
+                    title="You lost!",
+                    description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}",
+                    colour=discord.Colour.red(),
+                )
                 await interaction.response.send_message(embed=emb)
                 return
             elif botchoice == "paper":
-                emb = discord.Embed(title="You win!", description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}", colour=self.client.colour)
-                #emb.set_image(url="https://giphy.com/embed/3oEjHVNeiP3utYQyoE")
+                emb = discord.Embed(
+                    title="You win!",
+                    description=f"{interaction.user.mention} {yourem}\n{self.client.user.mention} {botem}",
+                    colour=self.client.colour,
+                )
                 await interaction.response.send_message(embed=emb)
                 return
-
 
 
 class RoleToggleButton(Button):
@@ -992,18 +1209,18 @@ class RoleToggleButton(Button):
 
 
 class mAddBtn(View):
-    def __init__(self, content: str=None, emoji: str=None, role: discord.Role=None, custom_id: str=None):
+    def __init__(
+        self,
+        content: str = None,
+        emoji: str = None,
+        role: discord.Role = None,
+        custom_id: str = None,
+    ):
         try:
             super().__init__(timeout=None)
             self.add_item(RoleToggleButton(content, emoji, role.id, custom_id))
         except Exception as e:
             print(e)
-
-
-
-
-
-
 
 
 async def setup(client):

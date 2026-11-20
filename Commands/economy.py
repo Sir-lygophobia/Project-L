@@ -69,9 +69,7 @@ def debit_balance_to_zero(user_id, amount, *, path=USERS_DB_PATH):
         raise ValueError("Debit amount must be non-negative.")
     with economy_transaction(path) as conn:
         existed = (
-            conn.execute(
-                "SELECT 1 FROM users WHERE userid = ?", (user_id,)
-            ).fetchone()
+            conn.execute("SELECT 1 FROM users WHERE userid = ?", (user_id,)).fetchone()
             is not None
         )
         conn.execute(
@@ -107,8 +105,7 @@ def transfer_balance(sender_id, recipient_id, amount, *, path=USERS_DB_PATH):
             return False
         _ensure_user(conn, recipient_id)
         conn.execute(
-            "UPDATE users SET balance = COALESCE(balance, 0) + ? "
-            "WHERE userid = ?",
+            "UPDATE users SET balance = COALESCE(balance, 0) + ? WHERE userid = ?",
             (amount, recipient_id),
         )
         return True
@@ -153,11 +150,9 @@ def rob_balance_transfer(robber_id, victim_id, requested_amount, *, path=USERS_D
         return amount
 
 
-
 class EconomyCommand(commands.Cog):
     def __init__(self, client):
         self.client = client
-
 
     def connect(self):
         try:
@@ -167,7 +162,6 @@ class EconomyCommand(commands.Cog):
         except Exception as exc:
             print(exc)
             return None
-
 
     def cooldown(self, remaining):
         if remaining < 60:
@@ -191,9 +185,10 @@ class EconomyCommand(commands.Cog):
         else:
             await interaction.response.send_message(message, ephemeral=True)
 
-
     @app_commands.command(name="dice", description=f"Roll a 50% dice")
-    async def dice(self, interaction: discord.Interaction, bet: app_commands.Range[int, 1, 1000000]):
+    async def dice(
+        self, interaction: discord.Interaction, bet: app_commands.Range[int, 1, 1000000]
+    ):
         print_interaction_info(interaction)
         userid = interaction.user.id
         if interaction.user.avatar is None:
@@ -207,7 +202,9 @@ class EconomyCommand(commands.Cog):
             settled = settle_wager(userid, bet, bet if won else -bet)
         except sqlite3.Error as exc:
             print(exc)
-            await interaction.response.send_message("Something went wrong, contact support. (Code 3)", ephemeral=True)
+            await interaction.response.send_message(
+                "Something went wrong, contact support. (Code 3)", ephemeral=True
+            )
             return
 
         if not settled:
@@ -231,11 +228,9 @@ class EconomyCommand(commands.Cog):
         await interaction.response.send_message(embed=emb)
         return
 
-
     @dice.error
     async def catch(self, interaction, error):
         await self.respond_command_error(interaction, error)
-
 
     @app_commands.command(name="rob", description="Rob another user")
     @app_commands.checks.cooldown(10, 180, key=lambda i: i.user.id)
@@ -253,14 +248,18 @@ class EconomyCommand(commands.Cog):
             ensure_economy_users((userid, member.id))
         except sqlite3.Error as exc:
             print(exc)
-            await interaction.response.send_message("Something went wrong, contact support. (Code 3)", ephemeral=True)
+            await interaction.response.send_message(
+                "Something went wrong, contact support. (Code 3)", ephemeral=True
+            )
             return
 
         rob = random.choice([True, False])
         if rob is False:
             arr = random.choice([True, False])
             if arr is False:
-                await interaction.response.send_message(f"{member.mention} got away! Robbery failed.")
+                await interaction.response.send_message(
+                    f"{member.mention} got away! Robbery failed."
+                )
                 return
             else:
                 fine = random.choice([10, 20, 30])
@@ -268,38 +267,47 @@ class EconomyCommand(commands.Cog):
                     debit_balance_to_zero(userid, fine)
                 except sqlite3.Error as exc:
                     print(exc)
-                    await interaction.response.send_message("Something went wrong, contact support. (Code 3)", ephemeral=True)
+                    await interaction.response.send_message(
+                        "Something went wrong, contact support. (Code 3)",
+                        ephemeral=True,
+                    )
                     return
 
-                await interaction.response.send_message(f"{member.mention} called the police! You have been fined **${fine}** for robbery")
+                await interaction.response.send_message(
+                    f"{member.mention} called the police! You have been fined **${fine}** for robbery"
+                )
                 return
 
         try:
-            num = rob_balance_transfer(
-                userid, member.id, random.randrange(10, 40)
-            )
+            num = rob_balance_transfer(userid, member.id, random.randrange(10, 40))
         except sqlite3.Error as exc:
             print(exc)
-            await interaction.response.send_message("Something went wrong, contact support. (Code 3)", ephemeral=True)
+            await interaction.response.send_message(
+                "Something went wrong, contact support. (Code 3)", ephemeral=True
+            )
             return
 
         if num == 0:
-            await interaction.response.send_message(f"{member.mention} got lucky and had **$0** in his wallet.")
+            await interaction.response.send_message(
+                f"{member.mention} got lucky and had **$0** in his wallet."
+            )
             return
 
-        await interaction.response.send_message(f"You robbed {member.mention} and received **${num}**")
+        await interaction.response.send_message(
+            f"You robbed {member.mention} and received **${num}**"
+        )
         return
-
 
     @rob.error
     async def catch(self, interaction, error):
         if isinstance(error, app_commands.CommandOnCooldown):
             wait = self.cooldown(error.retry_after)
-            await interaction.response.send_message(f"Wait **{wait}** before you can rob again", ephemeral=True)
+            await interaction.response.send_message(
+                f"Wait **{wait}** before you can rob again", ephemeral=True
+            )
             return
 
         await self.respond_command_error(interaction, error)
-
 
     @app_commands.command(name="work", description="Work and receive rewards")
     @app_commands.checks.cooldown(1, 300, key=lambda i: i.user.id)
@@ -316,24 +324,28 @@ class EconomyCommand(commands.Cog):
             credit_balance(userid, amount)
         except sqlite3.Error as exc:
             print(exc)
-            await interaction.response.send_message("Something went wrong, contact support. (Code 3)", ephemeral=True)
+            await interaction.response.send_message(
+                "Something went wrong, contact support. (Code 3)", ephemeral=True
+            )
             return
 
-        emb = discord.Embed(description=f"You received **${amount}**", colour=discord.Colour.green())
+        emb = discord.Embed(
+            description=f"You received **${amount}**", colour=discord.Colour.green()
+        )
         emb.set_author(name=f"Work", icon_url=userpfp)
         await interaction.response.send_message(embed=emb)
         return
-
 
     @work.error
     async def catch(self, interaction, error):
         if isinstance(error, app_commands.CommandOnCooldown):
             wait = self.cooldown(error.retry_after)
-            await interaction.response.send_message(f"Wait **{wait}** before you can work again", ephemeral=True)
+            await interaction.response.send_message(
+                f"Wait **{wait}** before you can work again", ephemeral=True
+            )
             return
 
         await self.respond_command_error(interaction, error)
-
 
     @app_commands.command(name="daily", description="Claim a free daily reward")
     @app_commands.checks.cooldown(1, 86400, key=lambda i: i.user.id)
@@ -350,27 +362,37 @@ class EconomyCommand(commands.Cog):
             credit_balance(userid, amount)
         except sqlite3.Error as exc:
             print(exc)
-            await interaction.response.send_message("Something went wrong, contact support. (Code 3)", ephemeral=True)
+            await interaction.response.send_message(
+                "Something went wrong, contact support. (Code 3)", ephemeral=True
+            )
             return
 
-        emb = discord.Embed(description=f"You received **${amount}**", colour=discord.Colour.green())
+        emb = discord.Embed(
+            description=f"You received **${amount}**", colour=discord.Colour.green()
+        )
         emb.set_author(name=f"Daily Reward", icon_url=userpfp)
         await interaction.response.send_message(embed=emb)
         return
-
 
     @daily.error
     async def catch(self, interaction, error):
         if isinstance(error, app_commands.CommandOnCooldown):
             wait = self.cooldown(error.retry_after)
-            await interaction.response.send_message(f"Wait **{wait}** before you can claim your daily reward.", ephemeral=True)
+            await interaction.response.send_message(
+                f"Wait **{wait}** before you can claim your daily reward.",
+                ephemeral=True,
+            )
             return
 
         await self.respond_command_error(interaction, error)
 
-
     @app_commands.command(name="bet", description="Bet against someone else")
-    async def bet(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 1000000]):
+    async def bet(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        amount: app_commands.Range[int, 1, 1000000],
+    ):
         print_interaction_info(interaction)
         userid = interaction.user.id
         userid1 = member.id
@@ -385,7 +407,9 @@ class EconomyCommand(commands.Cog):
             userpfp1 = member.avatar
 
         if interaction.user == member:
-            await interaction.response.send_message(f"You can't bet against yourself", ephemeral=True)
+            await interaction.response.send_message(
+                f"You can't bet against yourself", ephemeral=True
+            )
             return
 
         try:
@@ -416,10 +440,6 @@ class EconomyCommand(commands.Cog):
             )
             return
 
-
-
-
-
         class ChoiceView(discord.ui.View):
             def __init__(self):
                 super().__init__(timeout=300)
@@ -429,7 +449,9 @@ class EconomyCommand(commands.Cog):
             @discord.ui.button(emoji="✅", label="Accept", custom_id=f"accept")
             async def accept(self, inter: discord.Interaction, button: discord.Button):
                 if inter.user.id != member.id:
-                    await inter.response.send_message("This request is not for you.", ephemeral=True)
+                    await inter.response.send_message(
+                        "This request is not for you.", ephemeral=True
+                    )
                     return
 
                 async with self.resolve_lock:
@@ -467,11 +489,12 @@ class EconomyCommand(commands.Cog):
                                 "The bet could not be completed.", ephemeral=True
                             )
 
-
             @discord.ui.button(emoji="❌", label="Decline", custom_id=f"decline")
             async def decline(self, inter: discord.Interaction, button: discord.Button):
                 if inter.user.id != member.id:
-                    await inter.response.send_message("This request is not for you.", ephemeral=True)
+                    await inter.response.send_message(
+                        "This request is not for you.", ephemeral=True
+                    )
                     return
 
                 async with self.resolve_lock:
@@ -485,25 +508,26 @@ class EconomyCommand(commands.Cog):
                         content="Bet declined.", embed=None, view=None
                     )
 
-
         emb = discord.Embed(title="Bet Request", colour=discord.Colour.grey())
         emb.add_field(name="From", value=interaction.user.mention, inline=False)
         emb.add_field(name="Amount", value=f"${amount}", inline=False)
         emb.set_author(name=member, icon_url=userpfp1)
         emb.set_footer(text="Expires in 3 minutes")
 
-
         await interaction.response.send_message(embed=emb, view=ChoiceView())
         return
-
 
     @bet.error
     async def catch(self, interaction, error):
         await self.respond_command_error(interaction, error)
 
-
     @app_commands.command(name="crash", description="Play a game of crash")
-    async def crash(self, interaction: discord.Interaction, bet: app_commands.Range[int, 1, 1000000], cashout: app_commands.Range[float, 1.01, 100.0]):
+    async def crash(
+        self,
+        interaction: discord.Interaction,
+        bet: app_commands.Range[int, 1, 1000000],
+        cashout: app_commands.Range[float, 1.01, 100.0],
+    ):
         print_interaction_info(interaction)
         cash = cashout
         userid = interaction.user.id
@@ -532,7 +556,9 @@ class EconomyCommand(commands.Cog):
             return
 
         if not won:
-            emb = discord.Embed(title=f"{1.00 if x <= 1 else x}x", colour=discord.Colour.red())
+            emb = discord.Embed(
+                title=f"{1.00 if x <= 1 else x}x", colour=discord.Colour.red()
+            )
             emb.add_field(name="Bet", value=f"${bet}", inline=True)
             emb.add_field(name="Profit", value=f"-${bet}", inline=True)
             emb.add_field(name="Cashout", value=f"{cash}x", inline=False)
@@ -540,7 +566,9 @@ class EconomyCommand(commands.Cog):
             await interaction.response.send_message(embed=emb)
             return
         else:
-            emb = discord.Embed(title=f"{1.00 if x <= 1 else x}x", colour=discord.Colour.green())
+            emb = discord.Embed(
+                title=f"{1.00 if x <= 1 else x}x", colour=discord.Colour.green()
+            )
             emb.add_field(name="Bet", value=f"${bet}", inline=True)
             emb.add_field(
                 name="Profit", value=f"${round(payout - bet, 2)}", inline=True
@@ -550,20 +578,13 @@ class EconomyCommand(commands.Cog):
             await interaction.response.send_message(embed=emb)
             return
 
-
     @crash.error
     async def catch(self, interaction, error):
         await self.respond_command_error(interaction, error)
 
-
-
-
-
-
-
-
-
-    @app_commands.command(name="leaderboard", description="Displays the top 10 richest users")
+    @app_commands.command(
+        name="leaderboard", description="Displays the top 10 richest users"
+    )
     async def leaderboard(self, interaction: discord.Interaction):
         print_interaction_info(interaction)
         if interaction.user.avatar is None:
@@ -572,7 +593,9 @@ class EconomyCommand(commands.Cog):
             userpfp = interaction.user.avatar
         result = self.connect()
         if result is None:
-            await interaction.response.send_message("Something went wrong, contact support. (Code 3)", ephemeral=True)
+            await interaction.response.send_message(
+                "Something went wrong, contact support. (Code 3)", ephemeral=True
+            )
             return
 
         conn, curs = result
@@ -585,7 +608,6 @@ class EconomyCommand(commands.Cog):
         if len(records) == 0:
             emb = discord.Embed(description="No users found", colour=self.client.colour)
             emb.set_author(name="Leaderboard", icon_url=userpfp)
-            emb.set_image(url=self.client.greenline)
             await interaction.response.send_message(embed=emb)
             return
 
@@ -596,47 +618,52 @@ class EconomyCommand(commands.Cog):
 
         emb = discord.Embed(description=text, colour=self.client.colour)
         emb.set_author(name="Leaderboard", icon_url=userpfp)
-        emb.set_image(url=self.client.greenline)
         await interaction.response.send_message(embed=emb)
         return
-
 
     @leaderboard.error
     async def catch(self, interaction, error):
         await self.respond_command_error(interaction, error)
 
-
-
     @app_commands.command(name="send", description="Send someone else money")
     @app_commands.checks.has_permissions(administrator=True)
-    async def send(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 100000]):
+    async def send(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        amount: app_commands.Range[int, 1, 100000],
+    ):
         print_interaction_info(interaction)
         userid = interaction.user.id
         try:
             transferred = transfer_balance(userid, member.id, amount)
         except sqlite3.Error as exc:
             print(exc)
-            await interaction.response.send_message("Something went wrong, contact support. (Code 3)", ephemeral=True)
+            await interaction.response.send_message(
+                "Something went wrong, contact support. (Code 3)", ephemeral=True
+            )
             return
 
         if not transferred:
-            await interaction.response.send_message("Insufficient Balance", ephemeral=True)
+            await interaction.response.send_message(
+                "Insufficient Balance", ephemeral=True
+            )
             return
 
-        await interaction.response.send_message(f"You sent **${amount}** to {member.mention}")
+        await interaction.response.send_message(
+            f"You sent **${amount}** to {member.mention}"
+        )
         return
-
 
     @send.error
     async def catch(self, interaction, error):
         await self.respond_command_error(interaction, error)
 
-
     @app_commands.command(name="balance", description="Shows how much money you have")
-    @app_commands.describe(
-        member="Show somebody else's balance"
-    )
-    async def balance(self, interaction: discord.Interaction, member: discord.Member = None):
+    @app_commands.describe(member="Show somebody else's balance")
+    async def balance(
+        self, interaction: discord.Interaction, member: discord.Member = None
+    ):
         print_interaction_info(interaction)
         if member is not None:
             user = member
@@ -666,62 +693,76 @@ class EconomyCommand(commands.Cog):
                 "The economy database is temporarily unavailable.", ephemeral=True
             )
             return
-        emb = discord.Embed(description=f"**${round(balance, 2)}**", colour=self.client.colour)
+        emb = discord.Embed(
+            description=f"**${round(balance, 2)}**", colour=self.client.colour
+        )
         emb.set_author(name=f"{user}", icon_url=userpfp)
         await interaction.response.send_message(embed=emb)
         return
-
 
     @balance.error
     async def catch(self, interaction, error):
         await self.respond_command_error(interaction, error)
 
-
     @app_commands.command(name="addmoney", description="Add money to a user (Admin)")
     @app_commands.checks.has_permissions(administrator=True)
-    async def addmoney(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 100000]):
+    async def addmoney(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        amount: app_commands.Range[int, 1, 100000],
+    ):
         print_interaction_info(interaction)
         try:
             credit_balance(member.id, amount)
         except sqlite3.Error as exc:
             print(exc)
-            await interaction.response.send_message("Something went wrong, contact support. (Code 3)", ephemeral=True)
+            await interaction.response.send_message(
+                "Something went wrong, contact support. (Code 3)", ephemeral=True
+            )
             return
 
-        await interaction.response.send_message(f"Added **${amount}** to {member.mention}")
+        await interaction.response.send_message(
+            f"Added **${amount}** to {member.mention}"
+        )
         return
-
 
     @addmoney.error
     async def catch(self, interaction, error):
         await self.respond_command_error(interaction, error)
 
-    @app_commands.command(name="removemoney", description="Remove money from a user (Admin)")
+    @app_commands.command(
+        name="removemoney", description="Remove money from a user (Admin)"
+    )
     @app_commands.checks.has_permissions(administrator=True)
-    async def removemoney(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 100000]):
+    async def removemoney(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        amount: app_commands.Range[int, 1, 100000],
+    ):
         print_interaction_info(interaction)
         try:
             _, created = debit_balance_to_zero(member.id, amount)
         except sqlite3.Error as exc:
             print(exc)
-            await interaction.response.send_message("Something went wrong, contact support. (Code 3)", ephemeral=True)
+            await interaction.response.send_message(
+                "Something went wrong, contact support. (Code 3)", ephemeral=True
+            )
             return
 
         if created:
             await interaction.response.send_message(f"{member.mention} has **$0**")
             return
 
-        await interaction.response.send_message(f"Removed **${amount}** from {member.mention}")
+        await interaction.response.send_message(
+            f"Removed **${amount}** from {member.mention}"
+        )
         return
-
 
     @removemoney.error
     async def catch(self, interaction, error):
         await self.respond_command_error(interaction, error)
-
-
-
-
 
 
 async def setup(client):
