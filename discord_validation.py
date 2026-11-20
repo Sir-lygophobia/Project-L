@@ -10,7 +10,6 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-
 DISCORD_API = "https://discord.com/api/v10"
 USER_AGENT = "DiscordBot (https://discord.com/developers/docs, 1.5)"
 TICKET_TOPIC_PATTERN = re.compile(r"^ticket-owner:\d+$")
@@ -212,7 +211,7 @@ def _required_channel_permissions(label: str, channel_type: int) -> tuple[str, .
     if "Statistics Channel" in label:
         return ("view_channel", "manage_channels")
     if channel_type == 4:
-        return ("view_channel", "manage_channels", "manage_roles")
+        return ("view_channel", "manage_channels")
     if channel_type in {2, 13}:
         return ("view_channel", "connect", "speak")
     required = ["view_channel", "send_messages", "embed_links"]
@@ -313,7 +312,9 @@ def validate_discord_snapshot_report(
         (f"Reaction Role {index}", role_id)
         for index, role_id in enumerate(role_ids, start=1)
     )
-    configured_roles = [(label, int(role_id or 0)) for label, role_id in configured_roles]
+    configured_roles = [
+        (label, int(role_id or 0)) for label, role_id in configured_roles
+    ]
     for label, role_id in configured_roles:
         if role_id and role_id not in role_index:
             errors.append(f"{label} was not found in the configured server.")
@@ -370,8 +371,10 @@ def validate_discord_snapshot_report(
 
         stream_role_id = int(config.get("streamRole", 0) or 0)
         stream_role = role_index.get(stream_role_id)
-        if stream_role_id and stream_role is not None and not stream_role.get(
-            "mentionable", False
+        if (
+            stream_role_id
+            and stream_role is not None
+            and not stream_role.get("mentionable", False)
         ):
             warnings.append(
                 "Streamer Role is not mentionable, so Twitch alerts cannot mention it."
@@ -385,7 +388,9 @@ def validate_discord_snapshot_report(
             "Transcript Channel",
         }
         for label, channel in validated_channels:
-            if label in private_labels and _everyone_can_view(config, channel, role_index):
+            if label in private_labels and _everyone_can_view(
+                config, channel, role_index
+            ):
                 warnings.append(f"{label} is visible to nonstaff roles.")
 
         ticket_category_ids = {
@@ -427,7 +432,9 @@ def _get_json(path: str, token: str, timeout: float) -> Any:
             404: "The configured Discord server was not found.",
         }
         raise DiscordValidationError(
-            messages.get(exc.code, f"Discord returned HTTP {exc.code} during validation.")
+            messages.get(
+                exc.code, f"Discord returned HTTP {exc.code} during validation."
+            )
         ) from exc
     except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         raise DiscordValidationError(f"Could not validate with Discord: {exc}") from exc
@@ -449,7 +456,9 @@ def validate_live_discord_report(
     channels = _get_json(f"guilds/{guild_id}/channels", clean_token, timeout)
     roles = _get_json(f"guilds/{guild_id}/roles", clean_token, timeout)
     if not isinstance(bot_user, Mapping) or not bot_user.get("id"):
-        raise DiscordValidationError("Discord returned an unexpected validation response.")
+        raise DiscordValidationError(
+            "Discord returned an unexpected validation response."
+        )
     bot_member = _get_json(
         f"guilds/{guild_id}/members/{bot_user['id']}", clean_token, timeout
     )
@@ -458,7 +467,9 @@ def validate_live_discord_report(
         or not isinstance(roles, list)
         or not isinstance(bot_member, Mapping)
     ):
-        raise DiscordValidationError("Discord returned an unexpected validation response.")
+        raise DiscordValidationError(
+            "Discord returned an unexpected validation response."
+        )
     return validate_discord_snapshot_report(
         config,
         role_ids,

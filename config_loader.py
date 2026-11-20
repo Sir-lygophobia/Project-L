@@ -7,10 +7,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "Data" / "config.json"
 ROLES_PATH = BASE_DIR / "Data" / "roles.json"
+AUTOMATIC_SETUP_VERSION = 1
 
 ID_FIELDS = (
     "guildId",
@@ -92,14 +92,18 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     for field in ID_FIELDS:
         value = config[field]
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            raise ConfigError(f'Configuration field "{field}" must be a non-negative integer.')
+            raise ConfigError(
+                f'Configuration field "{field}" must be a non-negative integer.'
+            )
 
     for field in STRING_FIELDS:
         if not isinstance(config[field], str):
             raise ConfigError(f'Configuration field "{field}" must be a string.')
 
     if not isinstance(config["kickMemberFunction"], bool):
-        raise ConfigError('Configuration field "kickMemberFunction" must be true or false.')
+        raise ConfigError(
+            'Configuration field "kickMemberFunction" must be true or false.'
+        )
 
     if not isinstance(config["friendTwitch"], list):
         raise ConfigError('Configuration field "friendTwitch" must be a list.')

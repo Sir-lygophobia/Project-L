@@ -11,7 +11,11 @@ isolated `.venv`, installs every Python dependency, checks FFmpeg, initializes
 the SQLite tables, verifies that all bot extensions load, and opens a graphical
 configuration wizard.
 
-1. Create a bot in the Discord Developer Portal.
+1. Create a bot in the Discord Developer Portal and invite it with the `bot`
+   and `applications.commands` scopes.
+   Give its role **Manage Channels**, **Manage Roles**, **View Channels**,
+   **Send Messages**, **Embed Links**, **Attach Files**, and
+   **Read Message History**, **Connect**, and **Speak**.
 2. On the bot page, enable these privileged gateway intents:
    - Presence Intent
    - Server Members Intent
@@ -23,8 +27,9 @@ configuration wizard.
    ```
 
 4. In the setup window, enter the Discord bot token and server ID. Fill in only
-   the optional feature tabs you plan to use, then select **Save & Continue**.
-   You can paste raw Discord IDs or copied channel, role, and member mentions.
+   the optional roles and integrations you plan to use, then select
+   **Save & Create Setup**. Project L creates, secures, and remembers all of its
+   required channels and categories automatically.
 5. Start the bot:
 
    ```powershell
@@ -38,9 +43,12 @@ from the same folder. If required configuration is missing, start opens the
 wizard automatically. Run `.\configure.ps1` whenever you want to change the
 settings.
 
-The wizard masks secret fields, validates related settings together, checks
-configured channels, categories, and roles against Discord before saving, and
-writes to the local, Git-ignored `Data/config.json` and `Data/roles.json` files.
+The wizard masks secret fields, validates related settings together, checks the
+bot's permissions, reuses valid Project L resources, creates anything missing,
+and saves the generated IDs to the local, Git-ignored `Data/config.json` and
+`Data/roles.json` files. Running setup again is safe and does not delete server
+channels.
+
 To keep the bot token out of JSON entirely, set it before opening the wizard:
 
 ```powershell
@@ -58,32 +66,31 @@ error when required settings are incomplete:
 
 ## Configuration
 
-The graphical wizard is the recommended configuration method. You may still
-edit `Data/config.json` manually: Discord IDs must be JSON numbers without
-quotes, `0` leaves an optional channel or role disabled, and an empty string
-disables an optional account or API credential.
+The graphical wizard is the recommended configuration method. Channel and
+category IDs in `Data/config.json` are internal setup state; users do not need
+to find or enter them. You may still edit the file manually for advanced use:
+Discord IDs must be JSON numbers without quotes, `0` disables an optional role,
+and an empty string disables an optional account or API credential.
 
 Important settings:
 
 - `guildId`: the one Discord server this bot is allowed to handle.
-- `client_id`: the Discord application ID. It may remain `0`; Discord can
-  discover it after login.
-- `welcome` and `welcome_images`: welcome output and image-hosting channels.
+- `client_id`: discovered from the bot token during setup.
+- `welcome`: automatic welcome output channel. Generated welcome images are
+  attached directly to the welcome message.
 - `verified`: the role granted by the Verify button.
-- `invitechannel`: member invite/join announcements.
-- `modmail`: category used for modmail channels.
-- `transcripts`: private staff channel that receives ticket transcripts.
-- `voicecategory`: category for user-created voice channels.
-- `tickets`: category IDs for help, suggestion, and staff-report tickets.
-- `serverStatChannelIds`: renameable text, voice, or announcement channel IDs used for member statistics.
-- `logChannelIds`: channels for audit events. Unset entries disable that log.
+- `invitechannel`, `modmail`, `transcripts`, `voicecategory`, `tickets`,
+  `serverStatChannelIds`, and `logChannelIds` are filled automatically by the
+  wizard. Audit events share one private staff log channel.
 - `kickMemberFunction`: leave `false` unless you intentionally want the monthly
   cleanup of members who have remained unverified for more than 30 days.
 
-YouTube notifications require `ytChannel` and `ytChannelId`. The source accepts
-an `@handle`, a `UC...` channel ID, or a full YouTube channel URL. Twitch
-notifications require `twClientId`, `twClientsecret`, and at least one output
-channel. Twitch secrets can instead be supplied as environment variables:
+YouTube notifications only require `ytChannel`; setup creates the Discord alert
+channel. The source accepts an `@handle`, a `UC...` channel ID, or a full
+YouTube channel URL. Twitch notifications require `twClientId`,
+`twClientsecret`, and at least one streamer username. Primary and friend stream
+alerts share the automatic alert channel. Twitch secrets can instead be
+supplied as environment variables:
 
 ```powershell
 $env:TWITCH_CLIENT_ID = "your client id"
@@ -128,14 +135,13 @@ for YouTube extraction. Both are already available on the machine where this
 project was repaired.
 
 If Discord rejects the connection for privileged intents, enable all three
-listed intents in the Developer Portal and restart. If the bot reports an
-unavailable channel, verify that the configured ID belongs to `guildId` and
-that the bot can view and manage that resource.
+listed intents in the Developer Portal and restart. If a managed channel is
+deleted or unavailable, run `.\configure.ps1` again; setup recreates only the
+missing Project L resources.
 
-Modmail, private voice, and each ticket destination require Discord **category**
-IDs, not text-channel IDs. Saved sticky-message warnings come from `sticky.db`;
-they indicate that the bot cannot access an older saved channel. Grant access
-if it is still used, or run `/unsticky` from that channel before removing it.
+Saved sticky-message warnings come from `sticky.db`; they indicate that the bot
+cannot access an older saved channel. Grant access if it is still used, or run
+`/unsticky` from that channel before removing it.
 
 Ticket channels are created privately: `@everyone` is denied access, while the
 ticket opener, bot, administrators, and roles with Manage Channels are allowed.

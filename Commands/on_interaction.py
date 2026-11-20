@@ -226,7 +226,13 @@ class OnInteractionEvent(commands.Cog):
                     return
 
             channel = await interaction.guild.create_voice_channel(name=interaction.user.name, category=category)
-            await channel.set_permissions(member, administrator=True, manage_channels=True, connect=True, mute_members=True)
+            await channel.set_permissions(
+                member,
+                view_channel=True,
+                manage_channels=True,
+                connect=True,
+                speak=True,
+            )
             curs.execute(
                 "INSERT OR IGNORE INTO users(userid, balance, invited, left) "
                 "VALUES(?, 0, 0, 0)",

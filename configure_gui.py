@@ -9,6 +9,12 @@ import sys
 import webbrowser
 
 from config_loader import ConfigError, load_role_ids
+from discord_provisioning import (
+    DiscordProvisioningError,
+    configuration_without_managed_channels,
+    provision_guild_resources,
+    validate_provisioning_access,
+)
 from discord_validation import DiscordValidationError, validate_live_discord_report
 from setup_config import (
     EXAMPLE_CONFIG_PATH,
@@ -18,7 +24,6 @@ from setup_config import (
     load_editable_config,
     save_configuration,
 )
-
 
 DISCORD_APPLICATIONS_URL = "https://discord.com/developers/applications"
 
@@ -148,8 +153,12 @@ class ProjectLSetupWizard:
         style.configure("Required.TLabel", foreground="#bd2c2c")
         style.configure("Accent.TButton", font=("Segoe UI Semibold", 10))
         style.configure("Status.TLabel", background="#ffffff", foreground="#516079")
-        style.configure("ErrorStatus.TLabel", background="#ffffff", foreground="#b42318")
-        style.configure("SuccessStatus.TLabel", background="#ffffff", foreground="#18794e")
+        style.configure(
+            "ErrorStatus.TLabel", background="#ffffff", foreground="#b42318"
+        )
+        style.configure(
+            "SuccessStatus.TLabel", background="#ffffff", foreground="#18794e"
+        )
 
     def _build_layout(self):
         header = self.tk.Frame(self.root, background="#17243c", padx=28, pady=20)
@@ -163,7 +172,7 @@ class ProjectLSetupWizard:
         ).pack(anchor="w")
         self.tk.Label(
             header,
-            text="Enter the Discord IDs for the features you want to use. Blank optional fields stay disabled.",
+            text="Enter your bot and server details. Project L creates and secures its channels automatically.",
             background="#17243c",
             foreground="#d9e2f2",
             font=("Segoe UI", 10),
@@ -175,8 +184,8 @@ class ProjectLSetupWizard:
         self.tabs = {}
         for key, title in (
             ("core", "1. Core"),
-            ("channels", "2. Channels & Roles"),
-            ("tickets", "3. Tickets & Logs"),
+            ("channels", "2. Roles"),
+            ("tickets", "3. Automatic Setup"),
             ("stats", "4. Server Stats"),
             ("integrations", "5. Integrations"),
         ):
@@ -208,7 +217,7 @@ class ProjectLSetupWizard:
         )
         self.ttk.Button(
             footer,
-            text="Save & Continue",
+            text="Save & Create Setup",
             command=self.save,
             style="Accent.TButton",
         ).grid(row=0, column=3, padx=(8, 0))
@@ -320,13 +329,6 @@ class ProjectLSetupWizard:
             "Right-click your server after enabling Developer Mode, then choose Copy Server ID.",
             required=True,
         )
-        self._entry(
-            "core",
-            "client_id",
-            "Application ID",
-            "Developer Portal → General Information → Application ID. Optional; Discord can discover it after login.",
-        )
-
         controls = self.ttk.Frame(self.tabs["core"].content, style="Page.TFrame")
         controls.grid(
             row=self.tabs["core"].content.grid_size()[1],
@@ -382,19 +384,16 @@ class ProjectLSetupWizard:
     def _build_channels_tab(self):
         self._section(
             "channels",
-            "Welcome and membership",
-            "Enter only the features you want. Each value is a Discord snowflake ID, not a channel name.",
+            "Optional server roles",
+            "Channels and categories no longer need IDs. Only add role IDs for role-based features you plan to use.",
         )
         fields = (
-            ("welcome", "Welcome Channel ID", "Receives the welcome embed."),
-            (
-                "welcome_images",
-                "Welcome Image Channel ID",
-                "Hosts generated welcome images. Requires a Welcome Channel ID.",
-            ),
-            ("invitechannel", "Invite Log Channel ID", "Receives join and inviter announcements."),
             ("verified", "Verified Role ID", "Granted by the Verify button."),
-            ("streamRole", "Streamer Role ID", "Mentioned for the primary Twitch notification."),
+            (
+                "streamRole",
+                "Streamer Role ID",
+                "Mentioned for the primary Twitch notification.",
+            ),
         )
         for key, label, help_text in fields:
             self._entry("channels", key, label, help_text)
@@ -415,59 +414,42 @@ class ProjectLSetupWizard:
     def _build_tickets_tab(self):
         self._section(
             "tickets",
-            "Ticket and modmail resources",
-            "The ticket buttons use the three category IDs. Transcript access and destructive ticket actions are permission-checked.",
+            "Created automatically",
+            "When you choose Save & Create Setup, Project L reuses its existing managed resources or creates the missing ones. You never need to copy a channel ID.",
         )
-        fields = (
-            ("transcripts", "Transcript Channel ID", "Private staff channel that receives ticket text files."),
-            ("modmail", "Modmail Category ID", "Category where user DM conversations are mirrored."),
-            ("voicecategory", "Private Voice Category ID", "Category for user-created private voice channels."),
-            ("tickets.category_help", "Help Ticket Category ID", "Category used by the Help ticket button."),
-            (
-                "tickets.category_suggestions",
-                "Suggestion Ticket Category ID",
-                "Category used by the Suggestions ticket button.",
-            ),
-            ("tickets.category_report", "Staff Report Category ID", "Category used by the Report Staff button."),
-            ("logs", "Legacy Logs Channel ID", "Compatibility field retained for older configurations."),
-        )
-        for key, label, help_text in fields:
-            self._entry("tickets", key, label, help_text)
-
         self._section(
             "tickets",
-            "Audit log channels",
-            "Each event type can be enabled independently.",
+            "Public resources",
+            "A community category with a read-only welcome channel and, when an integration is enabled, one shared YouTube/Twitch alerts channel.",
         )
-        for key, label in (
-            ("logChannelIds.Message", "Message Log Channel ID"),
-            ("logChannelIds.Ban_Unban", "Ban / Unban Log Channel ID"),
-            ("logChannelIds.Join_Leave", "Join / Leave Log Channel ID"),
-            ("logChannelIds.Role", "Role Log Channel ID"),
-            ("logChannelIds.Channel", "Channel Log Channel ID"),
-        ):
-            self._entry("tickets", key, label, "Leave blank to disable this event log.")
+        self._section(
+            "tickets",
+            "Private staff resources",
+            "A secured staff category with logs and ticket transcripts, separate private categories for modmail, help tickets, suggestions, staff reports, and user-created voice channels. Nonstaff members cannot view them.",
+        )
+        self._section(
+            "tickets",
+            "Safe reruns",
+            "Setup never deletes channels. It keeps valid saved resources, finds Project L resources by their managed marker, and creates only what is missing.",
+        )
 
     def _build_stats_tab(self):
         self._section(
             "stats",
-            "Server statistic channels",
-            "The bot renames configured channels every six minutes. It needs Manage Channels permission.",
+            "Automatic server statistics",
+            "Project L creates a Server Stats category with five locked voice counters for members, bots, boosts, online members, and offline members. Members can see the counters but cannot join them.",
         )
-        for key, label in (
-            ("serverStatChannelIds.totalMembers", "Total Members Channel ID"),
-            ("serverStatChannelIds.totalBots", "Total Bots Channel ID"),
-            ("serverStatChannelIds.totalBoosts", "Total Boosts Channel ID"),
-            ("serverStatChannelIds.onlineMembers", "Online Members Channel ID"),
-            ("serverStatChannelIds.offlineMembers", "Offline Members Channel ID"),
-        ):
-            self._entry("stats", key, label, "Leave blank to disable this statistic.")
+        self._section(
+            "stats",
+            "Required bot permission",
+            "The bot must have Manage Channels so it can create these resources and refresh the counter names every six minutes.",
+        )
 
     def _build_integrations_tab(self):
         self._section(
             "integrations",
             "YouTube notifications",
-            "Both fields are required together. Leave both blank to disable YouTube checks.",
+            "Leave the channel blank to disable YouTube checks. The Discord alerts channel is created automatically.",
         )
         self._entry(
             "integrations",
@@ -475,13 +457,6 @@ class ProjectLSetupWizard:
             "YouTube Channel",
             "Enter an @handle, UC... channel ID, or full YouTube channel URL.",
         )
-        self._entry(
-            "integrations",
-            "ytChannelId",
-            "Discord Output Channel ID",
-            "Where new YouTube uploads are announced.",
-        )
-
         self._section(
             "integrations",
             "Twitch notifications",
@@ -492,12 +467,6 @@ class ProjectLSetupWizard:
             "twitchChannelName",
             "Primary Twitch Username",
             "The primary stream to announce. Do not include the full URL.",
-        )
-        self._entry(
-            "integrations",
-            "twChannelId",
-            "Primary Discord Output ID",
-            "Where the primary stream announcement is sent.",
         )
         self._entry(
             "integrations",
@@ -517,7 +486,7 @@ class ProjectLSetupWizard:
             "integrations",
             "friendTwitch",
             "Friend Streams",
-            "One per line: Discord output channel ID, Twitch username",
+            "One Twitch username per line. All alerts use the automatic Project L alerts channel.",
             height=6,
         )
 
@@ -535,29 +504,54 @@ class ProjectLSetupWizard:
 
     def validated_values(self):
         return build_configuration(
-            self.collect_values(), self.base_config, environ=os.environ
+            self.collect_values(),
+            self.base_config,
+            environ=os.environ,
+            auto_managed_channels=True,
         )
 
-    def validated_live_values(self):
+    def validated_live_values(self, *, provision: bool = False):
         config, role_ids = self.validated_values()
-        self.set_status("Checking Discord resources...")
-        self.root.update_idletasks()
         effective_token = config["token"] or os.environ.get("DISCORD_BOT_TOKEN", "")
+        provisioning_report = None
+        if provision:
+            self.set_status("Creating and securing Project L server resources...")
+            self.root.update_idletasks()
+            config, provisioning_report = provision_guild_resources(
+                config,
+                token=effective_token,
+            )
+            validation_config = config
+        else:
+            self.set_status("Checking the bot account and server permissions...")
+            self.root.update_idletasks()
+            config["client_id"] = validate_provisioning_access(
+                config,
+                token=effective_token,
+            )
+            validation_config = configuration_without_managed_channels(config)
+
+        self.set_status("Checking Discord permissions and roles...")
+        self.root.update_idletasks()
         report = validate_live_discord_report(
-            config,
+            validation_config,
             role_ids,
             token=effective_token,
         )
         if report.errors:
             raise ConfigError("\n".join(f"• {error}" for error in report.errors))
-        return config, role_ids, report.warnings
+        return config, role_ids, report.warnings, provisioning_report
 
     def validate_only(self):
         try:
-            _config, role_ids, warnings = self.validated_live_values()
-        except (ConfigError, DiscordValidationError) as exc:
-            self.set_status("Please correct the highlighted configuration errors.", error=True)
-            self.messagebox.showerror("Configuration needs attention", str(exc), parent=self.root)
+            _config, role_ids, warnings, _provisioning = self.validated_live_values()
+        except (ConfigError, DiscordProvisioningError, DiscordValidationError) as exc:
+            self.set_status(
+                "Please correct the highlighted configuration errors.", error=True
+            )
+            self.messagebox.showerror(
+                "Configuration needs attention", str(exc), parent=self.root
+            )
             return
         if warnings:
             self.set_status(
@@ -573,26 +567,42 @@ class ProjectLSetupWizard:
         self.set_status("Configuration is valid.", success=True)
         self.messagebox.showinfo(
             "Configuration is valid",
-            "All configured Discord resources exist and have the expected types. "
+            "The bot token, server access, and permissions are valid. Saving will "
+            "create or reuse the Project L server resources automatically. "
             f"{len(role_ids)} reaction roles are configured.",
             parent=self.root,
         )
 
     def save(self):
         try:
-            config, role_ids, warnings = self.validated_live_values()
+            config, role_ids, warnings, provisioning = self.validated_live_values(
+                provision=True
+            )
             save_configuration(config, role_ids)
-        except (ConfigError, DiscordValidationError, OSError) as exc:
+        except (
+            ConfigError,
+            DiscordProvisioningError,
+            DiscordValidationError,
+            OSError,
+        ) as exc:
             self.set_status("Configuration was not saved.", error=True)
-            self.messagebox.showerror("Could not save configuration", str(exc), parent=self.root)
+            self.messagebox.showerror(
+                "Could not save configuration", str(exc), parent=self.root
+            )
             return
 
         self.saved = True
-        self.set_status("Configuration saved successfully.", success=True)
+        provisioning_summary = (
+            provisioning.summary() if provisioning else "no changes needed"
+        )
+        self.set_status(
+            f"Configuration saved; server setup {provisioning_summary}.", success=True
+        )
         if warnings:
             self.messagebox.showwarning(
                 "Setup saved with warnings",
-                "Configuration saved. Project L is ready to continue starting. "
+                f"Configuration saved; server setup {provisioning_summary}. "
+                "Project L is ready to continue starting. "
                 "Review these findings when practical:\n\n"
                 f"{format_validation_warnings(warnings)}",
                 parent=self.root,
@@ -600,7 +610,8 @@ class ProjectLSetupWizard:
         else:
             self.messagebox.showinfo(
                 "Setup complete",
-                "Configuration saved. Project L is ready to continue starting.",
+                f"Configuration saved; server setup {provisioning_summary}. "
+                "Project L is ready to continue starting.",
                 parent=self.root,
             )
         self.root.destroy()
@@ -609,7 +620,13 @@ class ProjectLSetupWizard:
         self.root.destroy()
 
     def set_status(self, text: str, *, error: bool = False, success: bool = False):
-        style = "ErrorStatus.TLabel" if error else "SuccessStatus.TLabel" if success else "Status.TLabel"
+        style = (
+            "ErrorStatus.TLabel"
+            if error
+            else "SuccessStatus.TLabel"
+            if success
+            else "Status.TLabel"
+        )
         self.status.configure(text=text, style=style)
 
 
@@ -630,7 +647,7 @@ def run_gui() -> int:
     try:
         import tkinter
         from tkinter import messagebox, ttk
-    except ImportError as exc:
+    except ImportError:
         print(
             "Tkinter is unavailable. Repair the Python 3.11 installation with Tcl/Tk support.",
             file=sys.stderr,

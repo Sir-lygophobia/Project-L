@@ -6,11 +6,13 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from config_loader import (
+    AUTOMATIC_SETUP_VERSION,
     CONFIG_PATH,
     ROLES_PATH,
     ConfigError,
@@ -19,7 +21,6 @@ from config_loader import (
     missing_required_settings,
 )
 from youtube_notifications import YouTubeSourceError, normalize_youtube_source
-
 
 EXAMPLE_CONFIG_PATH = CONFIG_PATH.with_name("config.example.json")
 
@@ -37,6 +38,18 @@ NESTED_ID_FIELDS = {
     "logChannelIds.Join_Leave": ("logChannelIds", "Join_Leave"),
     "logChannelIds.Role": ("logChannelIds", "Role"),
     "logChannelIds.Channel": ("logChannelIds", "Channel"),
+}
+
+MANAGED_CHANNEL_ID_FIELDS = {
+    "welcome",
+    "welcome_images",
+    "invitechannel",
+    "ytChannelId",
+    "twChannelId",
+    "transcripts",
+    "logs",
+    "modmail",
+    "voicecategory",
 }
 
 
@@ -60,14 +73,18 @@ def load_editable_config(
     try:
         defaults = json.loads(example_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ConfigError(f"Could not read configuration template {example_path}: {exc}") from exc
+        raise ConfigError(
+            f"Could not read configuration template {example_path}: {exc}"
+        ) from exc
 
     if not config_path.exists():
         return defaults
     try:
         current = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ConfigError(f"Could not read existing configuration {config_path}: {exc}") from exc
+        raise ConfigError(
+            f"Could not read existing configuration {config_path}: {exc}"
+        ) from exc
     if not isinstance(current, dict):
         raise ConfigError(f"{config_path} must contain one JSON object.")
     return _merge_defaults(current, defaults)
@@ -92,7 +109,10 @@ def parse_discord_id(value: object, label: str, *, required: bool = False) -> in
 
 def parse_role_ids_text(value: str) -> list[int]:
     tokens = [token for token in re.split(r"[\s,]+", value.strip()) if token]
-    role_ids = [parse_discord_id(token, f"Reaction role item {index + 1}", required=True) for index, token in enumerate(tokens)]
+    role_ids = [
+        parse_discord_id(token, f"Reaction role item {index + 1}", required=True)
+        for index, token in enumerate(tokens)
+    ]
     if len(set(role_ids)) != len(role_ids):
         raise ConfigError("Reaction role IDs must not contain duplicates.")
     if len(role_ids) > 25:
@@ -105,32 +125,31 @@ def format_role_ids(role_ids: list[int]) -> str:
 
 
 def parse_twitch_friends_text(value: str) -> list[dict[str, Any]]:
+    """Parse friend stream usernames, while accepting the legacy ID/name format."""
     friends: list[dict[str, Any]] = []
-    seen_channels: set[int] = set()
     seen_names: set[str] = set()
     for line_number, raw_line in enumerate(value.splitlines(), start=1):
         line = raw_line.strip()
         if not line:
             continue
         parts = [part.strip() for part in line.split(",", maxsplit=1)]
-        twitch_name = parts[1].lstrip("@").strip() if len(parts) == 2 else ""
-        if len(parts) != 2 or not twitch_name:
-            raise ConfigError(
-                f"Twitch friend line {line_number} must be: Discord channel ID, Twitch username."
+        if len(parts) == 1:
+            channel_id = 0
+            twitch_name = parts[0].lstrip("@").strip()
+        else:
+            channel_id = parse_discord_id(
+                parts[0], f"Twitch friend line {line_number} channel", required=True
             )
-        channel_id = parse_discord_id(
-            parts[0], f"Twitch friend line {line_number} channel", required=True
-        )
-        if channel_id in seen_channels:
+            twitch_name = parts[1].lstrip("@").strip()
+        if not twitch_name:
             raise ConfigError(
-                f"Twitch friend line {line_number} repeats Discord channel ID {channel_id}."
+                f"Twitch friend line {line_number} must contain a Twitch username."
             )
         normalized_name = twitch_name.casefold()
         if normalized_name in seen_names:
             raise ConfigError(
                 f"Twitch friend line {line_number} repeats Twitch username {twitch_name}."
             )
-        seen_channels.add(channel_id)
         seen_names.add(normalized_name)
         friends.append(
             {
@@ -143,15 +162,26 @@ def parse_twitch_friends_text(value: str) -> list[dict[str, Any]]:
 
 def format_twitch_friends(friends: list[dict[str, Any]]) -> str:
     return "\n".join(
-        f"{friend.get('friendChannelId', '')}, {friend.get('friendChannel', '')}"
+        str(friend.get("friendChannel", ""))
         for friend in friends
-        if friend.get("friendChannelId") or friend.get("friendChannel")
+        if isinstance(friend, Mapping) and friend.get("friendChannel")
     )
 
 
 def _mapping_value(config: Mapping[str, Any], path: tuple[str, str]) -> Any:
     parent = config.get(path[0], {})
     return parent.get(path[1], 0) if isinstance(parent, Mapping) else 0
+
+
+def _safe_existing_id(value: object) -> int:
+    """Treat malformed hidden legacy IDs as missing so setup can replace them."""
+    if isinstance(value, bool):
+        return 0
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
 
 
 def flatten_config(config: Mapping[str, Any], role_ids: list[int]) -> dict[str, Any]:
@@ -183,7 +213,9 @@ def flatten_config(config: Mapping[str, Any], role_ids: list[int]) -> dict[str, 
     for flat_key, path in NESTED_ID_FIELDS.items():
         values[flat_key] = _mapping_value(config, path)
     friends = config.get("friendTwitch", [])
-    values["friendTwitch"] = format_twitch_friends(friends if isinstance(friends, list) else [])
+    values["friendTwitch"] = format_twitch_friends(
+        friends if isinstance(friends, list) else []
+    )
     values["roleIds"] = format_role_ids(role_ids)
     return values
 
@@ -193,6 +225,7 @@ def build_configuration(
     base_config: Mapping[str, Any],
     *,
     environ: Mapping[str, str] | None = None,
+    auto_managed_channels: bool = False,
 ) -> tuple[dict[str, Any], list[int]]:
     """Validate GUI values and return JSON-ready configuration objects."""
     environment = os.environ if environ is None else environ
@@ -208,7 +241,7 @@ def build_configuration(
         config[field] = str(values.get(field, "")).strip()
     config["twitchChannelName"] = config["twitchChannelName"].lstrip("@").strip()
 
-    for field in (
+    id_fields = (
         "guildId",
         "client_id",
         "welcome",
@@ -222,7 +255,12 @@ def build_configuration(
         "modmail",
         "voicecategory",
         "streamRole",
-    ):
+    )
+    if auto_managed_channels:
+        id_fields = tuple(
+            field for field in id_fields if field not in MANAGED_CHANNEL_ID_FIELDS
+        )
+    for field in id_fields:
         try:
             config[field] = parse_discord_id(
                 values.get(field, ""),
@@ -232,12 +270,13 @@ def build_configuration(
         except ConfigError as exc:
             errors.append(str(exc))
 
-    for flat_key, path in NESTED_ID_FIELDS.items():
-        try:
-            parsed = parse_discord_id(values.get(flat_key, ""), flat_key)
-            config.setdefault(path[0], {})[path[1]] = parsed
-        except ConfigError as exc:
-            errors.append(str(exc))
+    if not auto_managed_channels:
+        for flat_key, path in NESTED_ID_FIELDS.items():
+            try:
+                parsed = parse_discord_id(values.get(flat_key, ""), flat_key)
+                config.setdefault(path[0], {})[path[1]] = parsed
+            except ConfigError as exc:
+                errors.append(str(exc))
 
     config["kickMemberFunction"] = bool(values.get("kickMemberFunction", False))
 
@@ -245,6 +284,20 @@ def build_configuration(
         config["friendTwitch"] = parse_twitch_friends_text(
             str(values.get("friendTwitch", ""))
         )
+        if auto_managed_channels:
+            existing_friends = base_config.get("friendTwitch", [])
+            existing_ids = {
+                str(friend.get("friendChannel", "")).casefold(): _safe_existing_id(
+                    friend.get("friendChannelId")
+                )
+                for friend in existing_friends
+                if isinstance(friend, Mapping)
+            }
+            for friend in config["friendTwitch"]:
+                if not friend["friendChannelId"]:
+                    friend["friendChannelId"] = existing_ids.get(
+                        friend["friendChannel"].casefold(), 0
+                    )
     except ConfigError as exc:
         errors.append(str(exc))
         config["friendTwitch"] = []
@@ -264,7 +317,7 @@ def build_configuration(
 
     youtube_name = config["ytChannel"]
     youtube_output = config.get("ytChannelId", 0)
-    if bool(youtube_name) != bool(youtube_output):
+    if not auto_managed_channels and bool(youtube_name) != bool(youtube_output):
         errors.append(
             "YouTube notifications need both a YouTube channel and a Discord output channel ID."
         )
@@ -276,7 +329,9 @@ def build_configuration(
 
     primary_twitch_name = config["twitchChannelName"]
     primary_twitch_output = config.get("twChannelId", 0)
-    if bool(primary_twitch_name) != bool(primary_twitch_output):
+    if not auto_managed_channels and bool(primary_twitch_name) != bool(
+        primary_twitch_output
+    ):
         errors.append(
             "Primary Twitch notifications need both a Twitch username and a Discord output channel ID."
         )
@@ -290,25 +345,28 @@ def build_configuration(
         )
 
     twitch_is_used = bool(
-        (primary_twitch_name and primary_twitch_output) or config["friendTwitch"]
+        (primary_twitch_name and (primary_twitch_output or auto_managed_channels))
+        or config["friendTwitch"]
     )
-    effective_twitch_client = config["twClientId"] or environment.get("TWITCH_CLIENT_ID", "").strip()
-    effective_twitch_secret = config["twClientsecret"] or environment.get(
-        "TWITCH_CLIENT_SECRET", ""
-    ).strip()
+    effective_twitch_client = (
+        config["twClientId"] or environment.get("TWITCH_CLIENT_ID", "").strip()
+    )
+    effective_twitch_secret = (
+        config["twClientsecret"] or environment.get("TWITCH_CLIENT_SECRET", "").strip()
+    )
     if twitch_is_used and not (effective_twitch_client and effective_twitch_secret):
         errors.append(
             "Twitch notifications require a client ID and client secret, either here or in environment variables."
         )
 
     if config["kickMemberFunction"] and not config.get("verified"):
-        errors.append(
-            "The unverified-member cleanup requires a Verified Role ID."
-        )
-    if config.get("welcome_images") and not config.get("welcome"):
-        errors.append(
-            "A Welcome Image Channel ID also requires a Welcome Channel ID."
-        )
+        errors.append("The unverified-member cleanup requires a Verified Role ID.")
+    if (
+        not auto_managed_channels
+        and config.get("welcome_images")
+        and not config.get("welcome")
+    ):
+        errors.append("A Welcome Image Channel ID also requires a Welcome Channel ID.")
 
     if errors:
         raise ConfigError("\n".join(f"• {error}" for error in errors))
@@ -353,6 +411,19 @@ def configuration_status(
     try:
         config = load_config(config_path)
         reasons.extend(missing_required_settings(config))
+        managed = config.get("managedResources", {})
+        try:
+            provisioning_version = int(
+                managed.get("provisioningVersion", 0)
+                if isinstance(managed, Mapping)
+                else 0
+            )
+        except (TypeError, ValueError):
+            provisioning_version = 0
+        if provisioning_version < AUTOMATIC_SETUP_VERSION:
+            reasons.append(
+                "automatic Discord channel/category setup has not been completed"
+            )
     except ConfigError as exc:
         reasons.append(str(exc))
     try:

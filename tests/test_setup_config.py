@@ -6,7 +6,12 @@ from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
-from config_loader import ConfigError, load_config, load_role_ids
+from config_loader import (
+    AUTOMATIC_SETUP_VERSION,
+    ConfigError,
+    load_config,
+    load_role_ids,
+)
 from setup_config import (
     build_configuration,
     configuration_status,
@@ -17,7 +22,6 @@ from setup_config import (
     parse_twitch_friends_text,
     save_configuration,
 )
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_CONFIG = PROJECT_ROOT / "Data" / "config.example.json"
@@ -73,18 +77,57 @@ class SetupConfigTests(unittest.TestCase):
             parse_role_ids_text(" ".join(str(value) for value in range(1, 27)))
 
     def test_twitch_friend_rows_are_normalized_and_unique(self):
-        friends = parse_twitch_friends_text("123, @FirstStreamer\n456, second")
+        friends = parse_twitch_friends_text("123, @FirstStreamer\n456, second\nthird")
         self.assertEqual(
             friends,
             [
                 {"friendChannelId": 123, "friendChannel": "FirstStreamer"},
                 {"friendChannelId": 456, "friendChannel": "second"},
+                {"friendChannelId": 0, "friendChannel": "third"},
             ],
         )
         with self.assertRaisesRegex(ConfigError, "repeats Twitch username"):
             parse_twitch_friends_text("123, Streamer\n456, streamer")
-        with self.assertRaisesRegex(ConfigError, "must be"):
-            parse_twitch_friends_text("123")
+        with self.assertRaisesRegex(ConfigError, "required|must contain"):
+            parse_twitch_friends_text(",")
+
+    def test_automatic_setup_does_not_require_or_erase_channel_ids(self):
+        base = deepcopy(self.example)
+        base["welcome"] = 987
+        base["friendTwitch"] = [
+            {"friendChannelId": "bad", "friendChannel": "FriendOne"}
+        ]
+        values = {
+            "token": "local-token",
+            "guildId": "123456789",
+            "client_id": "",
+            "verified": "",
+            "streamRole": "",
+            "ytChannel": "@projectl",
+            "twitchChannelName": "",
+            "twClientId": "",
+            "twClientsecret": "",
+            "friendTwitch": "FriendOne\nFriendTwo",
+            "roleIds": "",
+            "kickMemberFunction": False,
+        }
+        config, role_ids = build_configuration(
+            values,
+            base,
+            environ={
+                "TWITCH_CLIENT_ID": "environment-client",
+                "TWITCH_CLIENT_SECRET": "environment-secret",
+            },
+            auto_managed_channels=True,
+        )
+        self.assertEqual(config["welcome"], 987)
+        self.assertEqual(config["ytChannelId"], 0)
+        self.assertEqual(
+            [friend["friendChannel"] for friend in config["friendTwitch"]],
+            ["FriendOne", "FriendTwo"],
+        )
+        self.assertEqual(config["friendTwitch"][0]["friendChannelId"], 0)
+        self.assertEqual(role_ids, [])
 
     def test_optional_notification_fields_must_be_complete_pairs(self):
         values = self.valid_values()
@@ -114,9 +157,7 @@ class SetupConfigTests(unittest.TestCase):
         values["ytChannel"] = "@Project_L"
         values["ytChannelId"] = "456"
         config, _role_ids = build_configuration(values, self.example, environ={})
-        self.assertEqual(
-            config["ytChannel"], "https://www.youtube.com/@Project_L"
-        )
+        self.assertEqual(config["ytChannel"], "https://www.youtube.com/@Project_L")
 
         values["ytChannel"] = "https://example.com/not-youtube"
         with self.assertRaisesRegex(ConfigError, "must use youtube.com"):
@@ -139,9 +180,7 @@ class SetupConfigTests(unittest.TestCase):
     def test_malformed_nested_objects_are_rebuilt_from_form_values(self):
         base = deepcopy(self.example)
         base["tickets"] = []
-        config, _role_ids = build_configuration(
-            self.valid_values(), base, environ={}
-        )
+        config, _role_ids = build_configuration(self.valid_values(), base, environ={})
         self.assertEqual(
             config["tickets"],
             {
@@ -154,9 +193,7 @@ class SetupConfigTests(unittest.TestCase):
     def test_save_outputs_loader_compatible_json_and_preserves_unknown_keys(self):
         base = deepcopy(self.example)
         base["futureSetting"] = {"enabled": True}
-        config, role_ids = build_configuration(
-            self.valid_values(), base, environ={}
-        )
+        config, role_ids = build_configuration(self.valid_values(), base, environ={})
         role_ids.extend([123, 456])
 
         with tempfile.TemporaryDirectory() as directory:
@@ -183,6 +220,7 @@ class SetupConfigTests(unittest.TestCase):
             self.example,
             environ={"DISCORD_BOT_TOKEN": "environment-secret"},
         )
+        config["managedResources"]["provisioningVersion"] = AUTOMATIC_SETUP_VERSION
         with tempfile.TemporaryDirectory() as directory:
             config_path = Path(directory) / "config.json"
             roles_path = Path(directory) / "roles.json"
@@ -198,6 +236,34 @@ class SetupConfigTests(unittest.TestCase):
                 complete, reasons = configuration_status(config_path, roles_path)
         self.assertTrue(complete)
         self.assertEqual(reasons, [])
+
+    def test_status_requires_automatic_server_setup_completion(self):
+        config, roles = build_configuration(
+            self.valid_values(), self.example, environ={}
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.json"
+            roles_path = Path(directory) / "roles.json"
+            save_configuration(
+                config,
+                roles,
+                config_path=config_path,
+                roles_path=roles_path,
+            )
+            complete, reasons = configuration_status(config_path, roles_path)
+            config["managedResources"]["provisioningVersion"] = AUTOMATIC_SETUP_VERSION
+            save_configuration(
+                config,
+                roles,
+                config_path=config_path,
+                roles_path=roles_path,
+            )
+            completed, completed_reasons = configuration_status(config_path, roles_path)
+
+        self.assertFalse(complete)
+        self.assertTrue(any("automatic Discord" in reason for reason in reasons))
+        self.assertTrue(completed)
+        self.assertEqual(completed_reasons, [])
 
     def test_editable_load_merges_template_without_environment_secrets(self):
         current = deepcopy(self.example)
@@ -215,6 +281,12 @@ class SetupConfigTests(unittest.TestCase):
         self.assertEqual(loaded["token"], "")
         self.assertEqual(loaded["streamRole"], 0)
         self.assertEqual(loaded["futureSetting"], 7)
+
+    def test_flatten_ignores_malformed_legacy_friend_rows(self):
+        malformed = deepcopy(self.example)
+        malformed["friendTwitch"] = ["bad", None, {"friendChannel": "Valid"}]
+        values = flatten_config(malformed, [])
+        self.assertEqual(values["friendTwitch"], "Valid")
 
 
 if __name__ == "__main__":

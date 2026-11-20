@@ -4,13 +4,13 @@ from pathlib import Path
 from unittest.mock import Mock, call, patch
 
 from configure_gui import ProjectLSetupWizard, format_validation_warnings
+from discord_provisioning import DiscordProvisioningReport
 from discord_validation import (
     PERMISSION_BITS,
     validate_discord_snapshot,
     validate_discord_snapshot_report,
     validate_live_discord_report,
 )
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_CONFIG = PROJECT_ROOT / "Data" / "config.example.json"
@@ -51,15 +51,19 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
         self.config["modmail"] = 301
         self.config["tickets"]["category_help"] = 999
         errors = self.validate([{"id": "301", "type": 0, "parent_id": None}])
-        self.assertTrue(any("Modmail Category points to a text channel" in error for error in errors))
-        self.assertTrue(any("Help Ticket Category was not found" in error for error in errors))
+        self.assertTrue(
+            any(
+                "Modmail Category points to a text channel" in error for error in errors
+            )
+        )
+        self.assertTrue(
+            any("Help Ticket Category was not found" in error for error in errors)
+        )
 
     def test_client_and_role_mismatches_are_reported(self):
         self.config["verified"] = 401
         errors = self.validate([], roles=[], bot_id=999)
-        self.assertIn(
-            "Application ID does not match the configured bot token.", errors
-        )
+        self.assertIn("Application ID does not match the configured bot token.", errors)
         self.assertIn("Verified Role was not found in the configured server.", errors)
 
     def test_full_category_is_rejected(self):
@@ -76,17 +80,42 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
         self.config["welcome"] = 301
         self.config["verified"] = 401
         roles = [
-            {"id": "100", "name": "@everyone", "permissions": str(PERMISSION_BITS["view_channel"]), "position": 0},
-            {"id": "201", "name": "Project L", "permissions": str(PERMISSION_BITS["view_channel"]), "position": 5, "tags": {"bot_id": "200"}},
-            {"id": "401", "name": "Verified", "permissions": "0", "position": 6, "managed": False},
-            {"id": "402", "name": "Managed Reaction", "permissions": "0", "position": 1, "managed": True},
+            {
+                "id": "100",
+                "name": "@everyone",
+                "permissions": str(PERMISSION_BITS["view_channel"]),
+                "position": 0,
+            },
+            {
+                "id": "201",
+                "name": "Project L",
+                "permissions": str(PERMISSION_BITS["view_channel"]),
+                "position": 5,
+                "tags": {"bot_id": "200"},
+            },
+            {
+                "id": "401",
+                "name": "Verified",
+                "permissions": "0",
+                "position": 6,
+                "managed": False,
+            },
+            {
+                "id": "402",
+                "name": "Managed Reaction",
+                "permissions": "0",
+                "position": 1,
+                "managed": True,
+            },
         ]
         report = validate_discord_snapshot_report(
             self.config,
             [402],
             bot_user={"id": "200"},
             bot_member={"roles": ["201"]},
-            channels=[{"id": "301", "type": 0, "parent_id": None, "permission_overwrites": []}],
+            channels=[
+                {"id": "301", "type": 0, "parent_id": None, "permission_overwrites": []}
+            ],
             roles=roles,
         )
         error_text = "\n".join(report.errors)
@@ -109,15 +138,30 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
             [],
             bot_user={"id": "200"},
             bot_member={"roles": ["201"]},
-            channels=[{
-                "id": "301",
-                "type": 0,
-                "parent_id": None,
-                "permission_overwrites": [{"id": "201", "type": 0, "allow": "0", "deny": str(PERMISSION_BITS["send_messages"])}],
-            }],
+            channels=[
+                {
+                    "id": "301",
+                    "type": 0,
+                    "parent_id": None,
+                    "permission_overwrites": [
+                        {
+                            "id": "201",
+                            "type": 0,
+                            "allow": "0",
+                            "deny": str(PERMISSION_BITS["send_messages"]),
+                        }
+                    ],
+                }
+            ],
             roles=[
                 {"id": "100", "name": "@everyone", "permissions": "0", "position": 0},
-                {"id": "201", "name": "Project L", "permissions": str(base_permissions), "position": 1, "tags": {"bot_id": "200"}},
+                {
+                    "id": "201",
+                    "name": "Project L",
+                    "permissions": str(base_permissions),
+                    "position": 1,
+                    "tags": {"bot_id": "200"},
+                },
             ],
         )
         self.assertEqual(
@@ -130,14 +174,50 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
         self.config["transcripts"] = 302
         self.config["streamRole"] = 401
         roles = [
-            {"id": "100", "name": "@everyone", "permissions": str(PERMISSION_BITS["view_channel"]), "position": 0},
-            {"id": "201", "name": "Project L", "permissions": str(PERMISSION_BITS["administrator"]), "position": 10, "tags": {"bot_id": "200"}},
-            {"id": "401", "name": "Streamer", "permissions": "0", "position": 2, "mentionable": False},
+            {
+                "id": "100",
+                "name": "@everyone",
+                "permissions": str(PERMISSION_BITS["view_channel"]),
+                "position": 0,
+            },
+            {
+                "id": "201",
+                "name": "Project L",
+                "permissions": str(PERMISSION_BITS["administrator"]),
+                "position": 10,
+                "tags": {"bot_id": "200"},
+            },
+            {
+                "id": "401",
+                "name": "Streamer",
+                "permissions": "0",
+                "position": 2,
+                "mentionable": False,
+            },
         ]
         channels = [
-            {"id": "301", "name": "tickets", "type": 4, "parent_id": None, "permission_overwrites": []},
-            {"id": "302", "name": "transcripts", "type": 0, "parent_id": None, "permission_overwrites": []},
-            {"id": "303", "name": "ticket-help-123", "topic": "ticket-owner:123", "type": 0, "parent_id": "301", "permission_overwrites": []},
+            {
+                "id": "301",
+                "name": "tickets",
+                "type": 4,
+                "parent_id": None,
+                "permission_overwrites": [],
+            },
+            {
+                "id": "302",
+                "name": "transcripts",
+                "type": 0,
+                "parent_id": None,
+                "permission_overwrites": [],
+            },
+            {
+                "id": "303",
+                "name": "ticket-help-123",
+                "topic": "ticket-owner:123",
+                "type": 0,
+                "parent_id": "301",
+                "permission_overwrites": [],
+            },
         ]
         report = validate_discord_snapshot_report(
             self.config,
@@ -159,7 +239,9 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
         responses = {
             "users/@me": {"id": "200"},
             "guilds/100/channels": [],
-            "guilds/100/roles": [{"id": "100", "name": "@everyone", "permissions": "0", "position": 0}],
+            "guilds/100/roles": [
+                {"id": "100", "name": "@everyone", "permissions": "0", "position": 0}
+            ],
             "guilds/100/members/200": {"roles": []},
         }
         with patch(
@@ -170,7 +252,9 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
                 self.config, [], token="token", timeout=1
             )
         self.assertEqual(report.errors, [])
-        self.assertIn(call("guilds/100/members/200", "token", 1), get_json.call_args_list)
+        self.assertIn(
+            call("guilds/100/members/200", "token", 1), get_json.call_args_list
+        )
 
     def test_gui_warnings_are_readable_and_do_not_block_saving(self):
         self.assertEqual(
@@ -183,7 +267,12 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
         wizard.saved = False
         wizard.set_status = Mock()
         wizard.validated_live_values = Mock(
-            return_value=({"token": ""}, [401], ["Review this finding."])
+            return_value=(
+                {"token": ""},
+                [401],
+                ["Review this finding."],
+                DiscordProvisioningReport(reused=["welcome channel"]),
+            )
         )
         with patch("configure_gui.save_configuration") as save_configuration:
             wizard.save()
@@ -192,6 +281,34 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
         wizard.messagebox.showwarning.assert_called_once()
         wizard.messagebox.showinfo.assert_not_called()
         wizard.root.destroy.assert_called_once()
+        wizard.validated_live_values.assert_called_once_with(provision=True)
+
+    def test_gui_validate_is_read_only_and_does_not_provision(self):
+        wizard = object.__new__(ProjectLSetupWizard)
+        wizard.root = Mock()
+        wizard.set_status = Mock()
+        wizard.validated_values = Mock(
+            return_value=({"token": "token", "guildId": 100}, [])
+        )
+        with (
+            patch("configure_gui.validate_provisioning_access", return_value=200),
+            patch(
+                "configure_gui.configuration_without_managed_channels",
+                return_value={"token": "token", "guildId": 100, "client_id": 200},
+            ),
+            patch(
+                "configure_gui.validate_live_discord_report",
+                return_value=Mock(errors=[], warnings=[]),
+            ),
+            patch("configure_gui.provision_guild_resources") as provision,
+        ):
+            config, roles, warnings, report = wizard.validated_live_values()
+
+        provision.assert_not_called()
+        self.assertEqual(config["client_id"], 200)
+        self.assertEqual(roles, [])
+        self.assertEqual(warnings, [])
+        self.assertIsNone(report)
 
 
 if __name__ == "__main__":

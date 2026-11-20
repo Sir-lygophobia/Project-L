@@ -38,7 +38,6 @@ guildId = config["guildId"]
 verifiedRoleId = config["verified"]
 kickMemberFunction = config["kickMemberFunction"]
 welcomeid = config["welcome"]
-welcome_image_id = config["welcome_images"]
 botclientid = config["client_id"]
 youtubeid = config["ytChannelId"]
 twitchid = config["twChannelId"]
@@ -637,10 +636,16 @@ async def on_member_join(member: discord.Member):
     )
     embed.add_field(
         name="<a:green_heartstatic:1108584890305351731> Your presence is a valuable addition <a:green_heartstatic:1108584890305351731>",
-        value="**━━━━━━━━━━━✦INFO✦━━━━━━━━━━━━━━━━➧**\n<a:green_planet:1105696371631202344> Read our Rules here <#1042619540774846605>\n<a:green_planet:1105696371631202344>  For Help, open a <#1105676532095127643>\n<a:green_planet:1105696371631202344> Customize Your Profile <#1105673962647715951> \n**╰━━━━━━✦ENJOY✦━━━━━━━━━━━━━━━━━━➧**",
+        value=(
+            "**━━━━━━━━━━━✦INFO✦━━━━━━━━━━━━━━━━➧**\n"
+            "Please read this server's rules and use its ticket panel if you need help.\n"
+            "Use the self-role and verification panels to personalize your profile.\n"
+            "**╰━━━━━━✦ENJOY✦━━━━━━━━━━━━━━━━━━➧**"
+        ),
         inline=False,
     )
 
+    welcome_file = None
     try:
         background = Editor("Data/welcome.jpg")
         profile_image = await load_image_async(str(member.display_avatar.url))
@@ -652,18 +657,16 @@ async def on_member_join(member: discord.Member):
         background.text((525, 300), "WELCOME !", color="white", font=poppins, align="center")
         background.text((525, 360), member.name, color="white", font=poppins_small, align="center")
 
-        welcome_image = client.get_channel(welcome_image_id)
-        if welcome_image is None:
-            raise RuntimeError(f"Welcome image channel {welcome_image_id} is unavailable.")
-        file = discord.File(fp=background.image_bytes, filename="wlcbg.jpg")
-        image_message = await welcome_image.send(file=file)
-        if image_message.attachments:
-            embed.set_image(url=image_message.attachments[0].url)
+        welcome_file = discord.File(fp=background.image_bytes, filename="wlcbg.jpg")
+        embed.set_image(url="attachment://wlcbg.jpg")
     except Exception as exc:
         print(f"[!] Welcome image generation failed; sending text embed instead: {exc}")
 
     try:
-        await welcome.send(embed=embed)
+        send_options = {"embed": embed}
+        if welcome_file is not None:
+            send_options["file"] = welcome_file
+        await welcome.send(**send_options)
     except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
         print(f"[!] Could not send welcome message for member {member.id}: {exc}")
 
