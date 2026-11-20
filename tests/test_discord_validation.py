@@ -1,0 +1,198 @@
+import json
+import unittest
+from pathlib import Path
+from unittest.mock import Mock, call, patch
+
+from configure_gui import ProjectLSetupWizard, format_validation_warnings
+from discord_validation import (
+    PERMISSION_BITS,
+    validate_discord_snapshot,
+    validate_discord_snapshot_report,
+    validate_live_discord_report,
+)
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+EXAMPLE_CONFIG = PROJECT_ROOT / "Data" / "config.example.json"
+
+
+class DiscordSnapshotValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.config = json.loads(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+        self.config["guildId"] = 100
+        self.config["client_id"] = 200
+
+    def validate(self, channels, roles=None, role_ids=None, bot_id=200):
+        return validate_discord_snapshot(
+            self.config,
+            [] if role_ids is None else role_ids,
+            bot_user={"id": str(bot_id)},
+            channels=channels,
+            roles=[] if roles is None else roles,
+        )
+
+    def test_valid_categories_text_channels_voice_channels_and_roles(self):
+        self.config["modmail"] = 301
+        self.config["transcripts"] = 302
+        self.config["serverStatChannelIds"]["totalMembers"] = 303
+        self.config["verified"] = 401
+        errors = self.validate(
+            [
+                {"id": "301", "type": 4, "parent_id": None},
+                {"id": "302", "type": 0, "parent_id": None},
+                {"id": "303", "type": 2, "parent_id": None},
+            ],
+            roles=[{"id": "401"}, {"id": "402"}],
+            role_ids=[402],
+        )
+        self.assertEqual(errors, [])
+
+    def test_wrong_channel_type_and_missing_channel_are_actionable(self):
+        self.config["modmail"] = 301
+        self.config["tickets"]["category_help"] = 999
+        errors = self.validate([{"id": "301", "type": 0, "parent_id": None}])
+        self.assertTrue(any("Modmail Category points to a text channel" in error for error in errors))
+        self.assertTrue(any("Help Ticket Category was not found" in error for error in errors))
+
+    def test_client_and_role_mismatches_are_reported(self):
+        self.config["verified"] = 401
+        errors = self.validate([], roles=[], bot_id=999)
+        self.assertIn(
+            "Application ID does not match the configured bot token.", errors
+        )
+        self.assertIn("Verified Role was not found in the configured server.", errors)
+
+    def test_full_category_is_rejected(self):
+        self.config["modmail"] = 301
+        channels = [{"id": "301", "type": 4, "parent_id": None}]
+        channels.extend(
+            {"id": str(500 + index), "type": 0, "parent_id": "301"}
+            for index in range(50)
+        )
+        errors = self.validate(channels)
+        self.assertIn("Modmail Category is full (50 channels).", errors)
+
+    def test_bot_permissions_and_role_hierarchy_are_blocking_errors(self):
+        self.config["welcome"] = 301
+        self.config["verified"] = 401
+        roles = [
+            {"id": "100", "name": "@everyone", "permissions": str(PERMISSION_BITS["view_channel"]), "position": 0},
+            {"id": "201", "name": "Project L", "permissions": str(PERMISSION_BITS["view_channel"]), "position": 5, "tags": {"bot_id": "200"}},
+            {"id": "401", "name": "Verified", "permissions": "0", "position": 6, "managed": False},
+            {"id": "402", "name": "Managed Reaction", "permissions": "0", "position": 1, "managed": True},
+        ]
+        report = validate_discord_snapshot_report(
+            self.config,
+            [402],
+            bot_user={"id": "200"},
+            bot_member={"roles": ["201"]},
+            channels=[{"id": "301", "type": 0, "parent_id": None, "permission_overwrites": []}],
+            roles=roles,
+        )
+        error_text = "\n".join(report.errors)
+        self.assertIn(
+            "Welcome Channel is missing bot permissions: Send Messages, Embed Links",
+            error_text,
+        )
+        self.assertIn("Verified Role is not below the bot's highest role", error_text)
+        self.assertIn("Reaction Role 1 is managed by Discord", error_text)
+        self.assertIn("The bot needs Manage Roles permission", error_text)
+
+    def test_channel_overwrite_can_remove_a_required_bot_permission(self):
+        self.config["welcome"] = 301
+        base_permissions = sum(
+            PERMISSION_BITS[name]
+            for name in ("view_channel", "send_messages", "embed_links")
+        )
+        report = validate_discord_snapshot_report(
+            self.config,
+            [],
+            bot_user={"id": "200"},
+            bot_member={"roles": ["201"]},
+            channels=[{
+                "id": "301",
+                "type": 0,
+                "parent_id": None,
+                "permission_overwrites": [{"id": "201", "type": 0, "allow": "0", "deny": str(PERMISSION_BITS["send_messages"])}],
+            }],
+            roles=[
+                {"id": "100", "name": "@everyone", "permissions": "0", "position": 0},
+                {"id": "201", "name": "Project L", "permissions": str(base_permissions), "position": 1, "tags": {"bot_id": "200"}},
+            ],
+        )
+        self.assertEqual(
+            report.errors,
+            ["Welcome Channel is missing bot permissions: Send Messages."],
+        )
+
+    def test_security_findings_are_nonblocking_warnings(self):
+        self.config["tickets"]["category_help"] = 301
+        self.config["transcripts"] = 302
+        self.config["streamRole"] = 401
+        roles = [
+            {"id": "100", "name": "@everyone", "permissions": str(PERMISSION_BITS["view_channel"]), "position": 0},
+            {"id": "201", "name": "Project L", "permissions": str(PERMISSION_BITS["administrator"]), "position": 10, "tags": {"bot_id": "200"}},
+            {"id": "401", "name": "Streamer", "permissions": "0", "position": 2, "mentionable": False},
+        ]
+        channels = [
+            {"id": "301", "name": "tickets", "type": 4, "parent_id": None, "permission_overwrites": []},
+            {"id": "302", "name": "transcripts", "type": 0, "parent_id": None, "permission_overwrites": []},
+            {"id": "303", "name": "ticket-help-123", "topic": "ticket-owner:123", "type": 0, "parent_id": "301", "permission_overwrites": []},
+        ]
+        report = validate_discord_snapshot_report(
+            self.config,
+            [],
+            bot_user={"id": "200"},
+            bot_member={"roles": ["201"]},
+            channels=channels,
+            roles=roles,
+        )
+        self.assertEqual(report.errors, [])
+        warning_text = "\n".join(report.warnings)
+        self.assertIn("Administrator permission", warning_text)
+        self.assertIn("Help Ticket Category is visible to nonstaff roles", warning_text)
+        self.assertIn("Transcript Channel is visible to nonstaff roles", warning_text)
+        self.assertIn("Streamer Role is not mentionable", warning_text)
+        self.assertIn("1 recognizable ticket channel(s)", warning_text)
+
+    def test_live_report_fetches_the_bot_guild_member(self):
+        responses = {
+            "users/@me": {"id": "200"},
+            "guilds/100/channels": [],
+            "guilds/100/roles": [{"id": "100", "name": "@everyone", "permissions": "0", "position": 0}],
+            "guilds/100/members/200": {"roles": []},
+        }
+        with patch(
+            "discord_validation._get_json",
+            side_effect=lambda path, _token, _timeout: responses[path],
+        ) as get_json:
+            report = validate_live_discord_report(
+                self.config, [], token="token", timeout=1
+            )
+        self.assertEqual(report.errors, [])
+        self.assertIn(call("guilds/100/members/200", "token", 1), get_json.call_args_list)
+
+    def test_gui_warnings_are_readable_and_do_not_block_saving(self):
+        self.assertEqual(
+            format_validation_warnings(["First warning", "Second warning"]),
+            "• First warning\n• Second warning",
+        )
+        wizard = object.__new__(ProjectLSetupWizard)
+        wizard.root = Mock()
+        wizard.messagebox = Mock()
+        wizard.saved = False
+        wizard.set_status = Mock()
+        wizard.validated_live_values = Mock(
+            return_value=({"token": ""}, [401], ["Review this finding."])
+        )
+        with patch("configure_gui.save_configuration") as save_configuration:
+            wizard.save()
+        save_configuration.assert_called_once_with({"token": ""}, [401])
+        self.assertTrue(wizard.saved)
+        wizard.messagebox.showwarning.assert_called_once()
+        wizard.messagebox.showinfo.assert_not_called()
+        wizard.root.destroy.assert_called_once()
+
+
+if __name__ == "__main__":
+    unittest.main()

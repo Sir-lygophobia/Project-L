@@ -1,54 +1,167 @@
-# Project-L
+# Project L
 
-![Screenshot_10](https://github.com/Sir-lygophobia/Project-L/assets/143434121/324c82ca-08ea-4a29-93a8-227e98254a2b)
+Project L is a Discord bot with moderation, tickets and modmail, reaction roles,
+music, invite tracking, giveaways, economy games, welcome messages, logging,
+sticky messages, Twitch notifications, YouTube notifications, and server stats.
 
-**List Of Features**
-*Moderation, ModMail, Music, Auto Roles, Sticky Messages,  Invite Tracker, Giveawy System, Rock Paper Scissors, Casino Games, Logs, and much more to come!* 
+## Quick start on Windows
 
-*Join the community visit:*  https://www.lygosland.com
+Project L is tested with Python 3.11. The included setup script creates an
+isolated `.venv`, installs every Python dependency, checks FFmpeg, initializes
+the SQLite tables, verifies that all bot extensions load, and opens a graphical
+configuration wizard.
 
-![IMG_0404](https://github.com/Sir-lygophobia/Project-L/assets/143434121/db4aee20-92e6-4c81-ae1b-247bd9b78dd4)
+1. Create a bot in the Discord Developer Portal.
+2. On the bot page, enable these privileged gateway intents:
+   - Presence Intent
+   - Server Members Intent
+   - Message Content Intent
+3. Open PowerShell in this project directory and run:
 
-**Instructions:**
+   ```powershell
+   .\setup.ps1
+   ```
 
-**1)** Download the bot to your pc
+4. In the setup window, enter the Discord bot token and server ID. Fill in only
+   the optional feature tabs you plan to use, then select **Save & Continue**.
+   You can paste raw Discord IDs or copied channel, role, and member mentions.
+5. Start the bot:
 
-![Screenshot_2](https://github.com/Sir-lygophobia/Project-L/assets/143434121/a0065b69-f250-487a-bb9b-4513be044f1f)
+   ```powershell
+   .\start.ps1
+   ```
 
-**2)** Use 7zip to unpack the .zip folder 7 zip can be download free here:https://www.7-zip.org/download.html
+The first setup can take several minutes. Future starts only need
+`.\start.ps1`. Startup automatically reruns dependency setup when
+`requirements.txt` changes and prevents a second copy of the bot from launching
+from the same folder. If required configuration is missing, start opens the
+wizard automatically. Run `.\configure.ps1` whenever you want to change the
+settings.
 
-![Screenshot_2](https://github.com/Sir-lygophobia/Project-L/assets/143434121/7ac50583-849f-4bd2-b018-1b1268af6fc8)
+The wizard masks secret fields, validates related settings together, checks
+configured channels, categories, and roles against Discord before saving, and
+writes to the local, Git-ignored `Data/config.json` and `Data/roles.json` files.
+To keep the bot token out of JSON entirely, set it before opening the wizard:
 
-**3)** Open config.json and change these:
-token = your bot token
-client_id = your bot client id
-Configure your channel ids/roles
+```powershell
+$env:DISCORD_BOT_TOKEN = "your bot token"
+.\setup.ps1
+```
 
-![Screenshot_3](https://github.com/Sir-lygophobia/Project-L/assets/143434121/258903a6-1cd7-40f7-a138-c1a7dba114fc)
+For unattended checks, `-NoGui` prevents a window from opening and returns an
+error when required settings are incomplete:
 
+```powershell
+.\setup.ps1 -NoGui
+.\start.ps1 -NoGui
+```
 
-**4)** Install python: Latest version(https://www.python.org/downloads) - Click the "Add to PATH" option on installer!
+## Configuration
 
-![Screenshot_4](https://github.com/Sir-lygophobia/Project-L/assets/143434121/362dd9bb-a3df-4cbb-a429-17c1936ee249)
+The graphical wizard is the recommended configuration method. You may still
+edit `Data/config.json` manually: Discord IDs must be JSON numbers without
+quotes, `0` leaves an optional channel or role disabled, and an empty string
+disables an optional account or API credential.
 
-**5)** Install git: https://git-scm.com/downloads
+Important settings:
 
-![Screenshot_5](https://github.com/Sir-lygophobia/Project-L/assets/143434121/e5c00c42-69cf-4ee7-810d-3e6dff731195)
+- `guildId`: the one Discord server this bot is allowed to handle.
+- `client_id`: the Discord application ID. It may remain `0`; Discord can
+  discover it after login.
+- `welcome` and `welcome_images`: welcome output and image-hosting channels.
+- `verified`: the role granted by the Verify button.
+- `invitechannel`: member invite/join announcements.
+- `modmail`: category used for modmail channels.
+- `transcripts`: private staff channel that receives ticket transcripts.
+- `voicecategory`: category for user-created voice channels.
+- `tickets`: category IDs for help, suggestion, and staff-report tickets.
+- `serverStatChannelIds`: renameable text, voice, or announcement channel IDs used for member statistics.
+- `logChannelIds`: channels for audit events. Unset entries disable that log.
+- `kickMemberFunction`: leave `false` unless you intentionally want the monthly
+  cleanup of members who have remained unverified for more than 30 days.
 
-**6)** Open CMD in windows, and type "cd pathtofolder and press the enter key". If you saved to Desktop it will be like this:
+YouTube notifications require `ytChannel` and `ytChannelId`. The source accepts
+an `@handle`, a `UC...` channel ID, or a full YouTube channel URL. Twitch
+notifications require `twClientId`, `twClientsecret`, and at least one output
+channel. Twitch secrets can instead be supplied as environment variables:
 
-![Screenshot_6](https://github.com/Sir-lygophobia/Project-L/assets/143434121/525c7377-716b-4999-a11b-98e3ea270cac)
+```powershell
+$env:TWITCH_CLIENT_ID = "your client id"
+$env:TWITCH_CLIENT_SECRET = "your client secret"
+```
 
-**7)** Type "pip install -r requirements.txt" 
+Reaction-role menu IDs can be entered in the wizard. They are stored in
+`Data/roles.json` as a JSON list; `Data/roles.example.json` is the safe manual
+template:
 
-![Screenshot_7](https://github.com/Sir-lygophobia/Project-L/assets/143434121/4f321d25-258f-4d1e-a324-7ac8662495b3)
+```json
+[
+  123456789012345678,
+  234567890123456789
+]
+```
 
-**8)** Type "pip install -U git+https://github.com/dermasmid/scrapetube"
+## Verification and troubleshooting
 
-![Screenshot_8](https://github.com/Sir-lygophobia/Project-L/assets/143434121/9bc22993-d3d5-464b-9a88-5766f4ab8641)
+Check the installation without connecting to Discord:
 
-**9)** To launch the bot open a CMD window and type: bot.py
+```powershell
+.\.venv\Scripts\python.exe bot.py --check
+```
 
-![Screenshot_9](https://github.com/Sir-lygophobia/Project-L/assets/143434121/e4f79345-3d6a-4bac-ab4a-e9ad10e81af3)
+Check whether the required configuration is complete without opening the GUI:
 
-*Type: /help in discord to display all of the commands*
+```powershell
+.\.venv\Scripts\python.exe configure_gui.py --check
+```
+
+Useful checks:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip check
+ffmpeg -version
+node --version
+```
+
+FFmpeg must be on `PATH` for `/play`. Node is used by current `yt-dlp` releases
+for YouTube extraction. Both are already available on the machine where this
+project was repaired.
+
+If Discord rejects the connection for privileged intents, enable all three
+listed intents in the Developer Portal and restart. If the bot reports an
+unavailable channel, verify that the configured ID belongs to `guildId` and
+that the bot can view and manage that resource.
+
+Modmail, private voice, and each ticket destination require Discord **category**
+IDs, not text-channel IDs. Saved sticky-message warnings come from `sticky.db`;
+they indicate that the bot cannot access an older saved channel. Grant access
+if it is still used, or run `/unsticky` from that channel before removing it.
+
+Ticket channels are created privately: `@everyone` is denied access, while the
+ticket opener, bot, administrators, and roles with Manage Channels are allowed.
+Modmail also requires a staff-only category that denies View Channel to
+`@everyone`. Users receive a delivery receipt after a successful modmail DM.
+
+Use `/help` in Discord after the application commands finish syncing.
+
+## Self-role panels
+
+New `/reactionroles` panels upload `Data/self_roles.gif` directly to Discord,
+so their embedded image does not expire. Images supplied to `/say` are also
+reuploaded as durable message attachments.
+
+If older Color, Gender, Age, Platform, Server Notification, or Game role panels
+show **Image failed to load**, run `/repairselfroles` in that channel as an
+administrator. The command edits only recognized bot-authored panels, preserves
+their existing buttons and unrelated attachments, and is safe to run again.
+
+## Data and privacy
+
+- Ticket attachments remain on Discord; the bot no longer uploads them to a
+  third-party image service.
+- Ticket transcript files are uniquely named and deleted locally after the
+  Discord upload attempt.
+- Runtime `.db` files, credentials, virtual environments, and transcript text
+  files are ignored by Git.
+- The databases included with this extracted copy contain existing Discord
+  records. Back them up and treat them as private; do not publish the archive.

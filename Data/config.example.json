@@ -1,0 +1,41 @@
+{
+  "token": "",
+  "guildId": 0,
+  "client_id": 0,
+  "welcome": 0,
+  "welcome_images": 0,
+  "invitechannel": 0,
+  "ytChannelId": 0,
+  "twChannelId": 0,
+  "verified": 0,
+  "transcripts": 0,
+  "logs": 0,
+  "modmail": 0,
+  "kickMemberFunction": false,
+  "voicecategory": 0,
+  "streamRole": 0,
+  "ytChannel": "",
+  "twitchChannelName": "",
+  "twClientId": "",
+  "twClientsecret": "",
+  "friendTwitch": [],
+  "tickets": {
+    "category_help": 0,
+    "category_suggestions": 0,
+    "category_report": 0
+  },
+  "serverStatChannelIds": {
+    "totalMembers": 0,
+    "totalBots": 0,
+    "totalBoosts": 0,
+    "onlineMembers": 0,
+    "offlineMembers": 0
+  },
+  "logChannelIds": {
+    "Message": 0,
+    "Ban_Unban": 0,
+    "Join_Leave": 0,
+    "Role": 0,
+    "Channel": 0
+  }
+}
