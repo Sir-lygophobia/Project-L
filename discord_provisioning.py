@@ -13,7 +13,17 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from config_loader import AUTOMATIC_SETUP_VERSION
-from discord_validation import DISCORD_API, PERMISSION_BITS, USER_AGENT
+from discord_branding import install_bundled_emojis
+from discord_validation import (
+    DISCORD_API,
+    PERMISSION_BITS,
+    REQUIRED_BOT_PERMISSION_SPECS,
+    USER_AGENT,
+    missing_privileged_intents,
+)
+from discord_validation import (
+    required_bot_permissions as _required_bot_permissions,
+)
 
 RequestJson = Callable[..., Any]
 
@@ -26,31 +36,15 @@ CATEGORY_CHANNEL = 4
 
 # Permissions needed by always-loaded Project L features. Keeping this list in
 # one place makes both preflight errors and the generated OAuth invite exact.
-PROJECT_L_PERMISSION_SPECS = (
-    ("kick_members", "Kick Members", 1 << 1, "moderation"),
-    ("ban_members", "Ban Members", 1 << 2, "moderation"),
-    ("manage_channels", "Manage Channels", 1 << 4, "core"),
-    ("manage_guild", "Manage Server", 1 << 5, "invites"),
-    ("add_reactions", "Add Reactions", 1 << 6, "giveaways"),
-    ("view_audit_log", "View Audit Log", 1 << 7, "logging"),
-    ("view_channel", "View Channels", 1 << 10, "core"),
-    ("send_messages", "Send Messages", 1 << 11, "core"),
-    ("manage_messages", "Manage Messages", 1 << 13, "moderation"),
-    ("embed_links", "Embed Links", 1 << 14, "core"),
-    ("attach_files", "Attach Files", 1 << 15, "core"),
-    ("read_message_history", "Read Message History", 1 << 16, "core"),
-    ("mention_everyone", "Mention @everyone, @here, and All Roles", 1 << 17, "alerts"),
-    ("connect", "Connect", 1 << 20, "voice"),
-    ("speak", "Speak", 1 << 21, "voice"),
-    ("manage_roles", "Manage Roles", 1 << 28, "roles"),
-    ("manage_expressions", "Manage Expressions", 1 << 30, "moderation"),
-    ("moderate_members", "Moderate Members", 1 << 40, "moderation"),
+PROJECT_L_PERMISSION_SPECS = tuple(
+    (name, label, PERMISSION_BITS[name], feature)
+    for name, label, feature in REQUIRED_BOT_PERMISSION_SPECS
 )
 
 
 def required_bot_permissions(_config: Mapping[str, Any] | None = None) -> int:
     """Return the permission integer for the bot's always-loaded features."""
-    return sum(bit for _name, _label, bit, _feature in PROJECT_L_PERMISSION_SPECS)
+    return _required_bot_permissions()
 
 
 def build_bot_invite_url(client_id: int, guild_id: int = 0) -> str:
@@ -59,6 +53,7 @@ def build_bot_invite_url(client_id: int, guild_id: int = 0) -> str:
         "client_id": str(int(client_id)),
         "scope": "bot applications.commands",
         "permissions": str(required_bot_permissions()),
+        "integration_type": "0",
     }
     if guild_id:
         query["guild_id"] = str(int(guild_id))
@@ -96,6 +91,7 @@ class DiscordProvisioningReport:
     created: list[str] = field(default_factory=list)
     reused: list[str] = field(default_factory=list)
     updated: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         parts = []
@@ -105,6 +101,8 @@ class DiscordProvisioningReport:
             parts.append(f"reused {len(self.reused)}")
         if self.updated:
             parts.append(f"secured or updated {len(self.updated)}")
+        if self.warnings:
+            parts.append(f"{len(self.warnings)} optional art warning(s)")
         return ", ".join(parts) if parts else "no changes needed"
 
 
@@ -208,13 +206,26 @@ def _fetch_snapshot(
         )
 
     bot_user = request_json("GET", "users/@me", token, timeout)
-    channels = request_json("GET", f"guilds/{guild_id}/channels", token, timeout)
-    roles = request_json("GET", f"guilds/{guild_id}/roles", token, timeout)
+    application = request_json("GET", "oauth2/applications/@me", token, timeout)
     if not isinstance(bot_user, Mapping) or not bot_user.get("id"):
         raise DiscordProvisioningError(
             "Discord returned an invalid bot account response."
         )
     bot_user_id = int(bot_user["id"])
+    if not isinstance(application, Mapping):
+        raise DiscordProvisioningError(
+            "Discord returned an invalid bot application response."
+        )
+    missing_intents = missing_privileged_intents(application)
+    if missing_intents:
+        raise DiscordProvisioningError(
+            "Enable Project L's required Privileged Gateway Intents before "
+            "automatic setup: " + ", ".join(missing_intents) + ". Open "
+            f"https://discord.com/developers/applications/{bot_user_id}/bot, "
+            "enable each switch, save, and try again."
+        )
+    channels = request_json("GET", f"guilds/{guild_id}/channels", token, timeout)
+    roles = request_json("GET", f"guilds/{guild_id}/roles", token, timeout)
     bot_member = request_json(
         "GET", f"guilds/{guild_id}/members/{bot_user_id}", token, timeout
     )
@@ -1054,6 +1065,20 @@ def provision_guild_resources(
     else:
         updated_config["ytChannelId"] = 0
         updated_config["twChannelId"] = 0
+
+    emoji_report = install_bundled_emojis(
+        snapshot.guild_id,
+        token=token,
+        request_json=request_json,
+        timeout=timeout,
+    )
+    report.created.extend(
+        f"server emoji :{name}:" for name in emoji_report.created
+    )
+    report.reused.extend(
+        f"server emoji :{name}:" for name in emoji_report.existing
+    )
+    report.warnings.extend(emoji_report.warnings)
 
     managed["provisioningVersion"] = AUTOMATIC_SETUP_VERSION
     return updated_config, report

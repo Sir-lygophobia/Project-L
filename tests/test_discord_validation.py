@@ -3,10 +3,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, call, patch
 
-from configure_gui import ProjectLSetupWizard, format_validation_warnings
+from config_loader import ConfigError
+from configure_gui import (
+    ProjectLSetupWizard,
+    build_bot_settings_url,
+    format_validation_warnings,
+    required_gateway_intents_text,
+)
 from discord_provisioning import DiscordProvisioningReport
 from discord_validation import (
     PERMISSION_BITS,
+    required_bot_permissions,
     validate_discord_snapshot,
     validate_discord_snapshot_report,
     validate_live_discord_report,
@@ -14,6 +21,7 @@ from discord_validation import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_CONFIG = PROJECT_ROOT / "Data" / "config.example.json"
+ENABLED_PRIVILEGED_INTENT_FLAGS = (1 << 13) | (1 << 15) | (1 << 19)
 
 
 class DiscordSnapshotValidationTests(unittest.TestCase):
@@ -65,6 +73,21 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
         errors = self.validate([], roles=[], bot_id=999)
         self.assertIn("Application ID does not match the configured bot token.", errors)
         self.assertIn("Verified Role was not found in the configured server.", errors)
+
+    def test_disabled_privileged_intents_are_blocking_and_actionable(self):
+        report = validate_discord_snapshot_report(
+            self.config,
+            [],
+            bot_user={"id": "200"},
+            application={"id": "200", "flags_new": str(1 << 15)},
+            channels=[],
+            roles=[],
+        )
+        self.assertEqual(len(report.errors), 1)
+        self.assertIn("Presence Intent", report.errors[0])
+        self.assertNotIn("Server Members Intent", report.errors[0])
+        self.assertIn("Message Content Intent", report.errors[0])
+        self.assertIn("/applications/200/bot", report.errors[0])
 
     def test_full_category_is_rejected(self):
         self.config["modmail"] = 301
@@ -125,14 +148,11 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
         )
         self.assertIn("Verified Role is not below the bot's highest role", error_text)
         self.assertIn("Reaction Role 1 is managed by Discord", error_text)
-        self.assertIn("The bot needs Manage Roles permission", error_text)
+        self.assertIn("Manage Roles", error_text)
 
     def test_channel_overwrite_can_remove_a_required_bot_permission(self):
         self.config["welcome"] = 301
-        base_permissions = sum(
-            PERMISSION_BITS[name]
-            for name in ("view_channel", "send_messages", "embed_links")
-        )
+        base_permissions = required_bot_permissions()
         report = validate_discord_snapshot_report(
             self.config,
             [],
@@ -238,9 +258,18 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
     def test_live_report_fetches_the_bot_guild_member(self):
         responses = {
             "users/@me": {"id": "200"},
+            "oauth2/applications/@me": {
+                "id": "200",
+                "flags": ENABLED_PRIVILEGED_INTENT_FLAGS,
+            },
             "guilds/100/channels": [],
             "guilds/100/roles": [
-                {"id": "100", "name": "@everyone", "permissions": "0", "position": 0}
+                {
+                    "id": "100",
+                    "name": "@everyone",
+                    "permissions": str(required_bot_permissions()),
+                    "position": 0,
+                }
             ],
             "guilds/100/members/200": {"roles": []},
         }
@@ -305,6 +334,52 @@ class DiscordSnapshotValidationTests(unittest.TestCase):
         build_invite.assert_called_once_with(654321, 123456)
         open_browser.assert_called_once_with("https://discord.example/invite")
         wizard.messagebox.showerror.assert_not_called()
+
+    def test_gui_bot_settings_button_resolves_exact_application(self):
+        wizard = object.__new__(ProjectLSetupWizard)
+        wizard.variables = {"token": Mock(get=Mock(return_value="bot-token"))}
+        wizard.root = Mock()
+        wizard.messagebox = Mock()
+        wizard.set_status = Mock()
+        with (
+            patch("configure_gui.discover_bot_user_id", return_value=654321),
+            patch("configure_gui.webbrowser.open", return_value=True) as open_browser,
+        ):
+            wizard.open_bot_settings()
+
+        self.assertEqual(
+            build_bot_settings_url(654321),
+            "https://discord.com/developers/applications/654321/bot",
+        )
+        open_browser.assert_called_once_with(build_bot_settings_url(654321))
+        wizard.messagebox.showerror.assert_not_called()
+
+    def test_gui_server_branding_button_opens_configured_server(self):
+        wizard = object.__new__(ProjectLSetupWizard)
+        wizard.variables = {"guildId": Mock(get=Mock(return_value="123456789"))}
+        wizard.root = Mock()
+        wizard.messagebox = Mock()
+        wizard.set_status = Mock()
+        with patch("configure_gui.webbrowser.open", return_value=True) as open_browser:
+            wizard.open_server_in_discord()
+
+        open_browser.assert_called_once_with(
+            "https://discord.com/channels/123456789"
+        )
+        wizard.messagebox.showerror.assert_not_called()
+
+    def test_gui_requires_privileged_intent_confirmation(self):
+        wizard = object.__new__(ProjectLSetupWizard)
+        wizard.gateway_intents_confirmed = Mock(get=Mock(return_value=False))
+        with self.assertRaisesRegex(
+            ConfigError,
+            "Presence Intent.*Server Members Intent.*Message Content Intent",
+        ):
+            wizard.validated_values()
+        self.assertEqual(
+            required_gateway_intents_text(),
+            "Presence Intent, Server Members Intent, Message Content Intent",
+        )
 
     def test_gui_validate_is_read_only_and_does_not_provision(self):
         wizard = object.__new__(ProjectLSetupWizard)

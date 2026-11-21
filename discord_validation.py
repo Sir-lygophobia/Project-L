@@ -23,10 +23,16 @@ CHANNEL_TYPE_NAMES = {
     16: "media channel",
 }
 PERMISSION_BITS = {
+    "kick_members": 1 << 1,
+    "ban_members": 1 << 2,
     "administrator": 1 << 3,
     "manage_channels": 1 << 4,
+    "manage_guild": 1 << 5,
+    "add_reactions": 1 << 6,
+    "view_audit_log": 1 << 7,
     "view_channel": 1 << 10,
     "send_messages": 1 << 11,
+    "manage_messages": 1 << 13,
     "embed_links": 1 << 14,
     "attach_files": 1 << 15,
     "read_message_history": 1 << 16,
@@ -34,17 +40,69 @@ PERMISSION_BITS = {
     "connect": 1 << 20,
     "speak": 1 << 21,
     "manage_roles": 1 << 28,
+    "manage_guild_expressions": 1 << 30,
+    "send_messages_in_threads": 1 << 38,
+    "moderate_members": 1 << 40,
+    "create_guild_expressions": 1 << 43,
 }
 PERMISSION_LABELS = {
+    "kick_members": "Kick Members",
+    "ban_members": "Ban Members",
     "manage_channels": "Manage Channels",
+    "manage_guild": "Manage Server",
+    "add_reactions": "Add Reactions",
+    "view_audit_log": "View Audit Log",
     "view_channel": "View Channel",
     "send_messages": "Send Messages",
+    "manage_messages": "Manage Messages",
     "embed_links": "Embed Links",
     "attach_files": "Attach Files",
+    "read_message_history": "Read Message History",
+    "mention_everyone": "Mention @everyone, @here, and All Roles",
     "connect": "Connect",
     "speak": "Speak",
     "manage_roles": "Manage Roles",
+    "send_messages_in_threads": "Send Messages in Threads",
+    "moderate_members": "Timeout Members",
+    "create_guild_expressions": "Create Expressions",
 }
+
+# Guild permissions used by Project L's always-loaded commands and background
+# tasks. This is shared by live validation and the generated OAuth invite so
+# setup cannot report success with a permission the running bot still lacks.
+REQUIRED_BOT_PERMISSION_SPECS = (
+    ("kick_members", PERMISSION_LABELS["kick_members"], "moderation"),
+    ("ban_members", PERMISSION_LABELS["ban_members"], "moderation"),
+    ("manage_channels", PERMISSION_LABELS["manage_channels"], "core"),
+    ("manage_guild", PERMISSION_LABELS["manage_guild"], "invites"),
+    ("add_reactions", PERMISSION_LABELS["add_reactions"], "giveaways"),
+    ("view_audit_log", PERMISSION_LABELS["view_audit_log"], "logging"),
+    ("view_channel", "View Channels", "core"),
+    ("send_messages", PERMISSION_LABELS["send_messages"], "core"),
+    ("send_messages_in_threads", PERMISSION_LABELS["send_messages_in_threads"], "core"),
+    ("manage_messages", PERMISSION_LABELS["manage_messages"], "moderation"),
+    ("embed_links", PERMISSION_LABELS["embed_links"], "core"),
+    ("attach_files", PERMISSION_LABELS["attach_files"], "core"),
+    ("read_message_history", PERMISSION_LABELS["read_message_history"], "core"),
+    ("mention_everyone", PERMISSION_LABELS["mention_everyone"], "alerts"),
+    ("connect", PERMISSION_LABELS["connect"], "voice"),
+    ("speak", PERMISSION_LABELS["speak"], "voice"),
+    ("manage_roles", PERMISSION_LABELS["manage_roles"], "roles"),
+    (
+        "create_guild_expressions",
+        PERMISSION_LABELS["create_guild_expressions"],
+        "moderation",
+    ),
+    ("moderate_members", PERMISSION_LABELS["moderate_members"], "moderation"),
+)
+
+# Discord exposes one flag for approved large applications and one for
+# self-service/limited applications. Either flag means the intent is enabled.
+PRIVILEGED_INTENT_SPECS = (
+    ("Presence Intent", (1 << 12) | (1 << 13)),
+    ("Server Members Intent", (1 << 14) | (1 << 15)),
+    ("Message Content Intent", (1 << 18) | (1 << 19)),
+)
 
 
 @dataclass(frozen=True)
@@ -157,6 +215,24 @@ def _permission_value(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def required_bot_permissions() -> int:
+    """Return the exact guild permission bitset requested during installation."""
+    return sum(
+        PERMISSION_BITS[name]
+        for name, _label, _feature in REQUIRED_BOT_PERMISSION_SPECS
+    )
+
+
+def missing_privileged_intents(application: Mapping[str, Any]) -> list[str]:
+    """Return required privileged gateway intents disabled for an application."""
+    flags = _permission_value(application.get("flags_new", application.get("flags", 0)))
+    return [
+        label
+        for label, accepted_flags in PRIVILEGED_INTENT_SPECS
+        if not flags & accepted_flags
+    ]
 
 
 def _bot_guild_permissions(
@@ -290,6 +366,7 @@ def validate_discord_snapshot_report(
     channels: list[Mapping[str, Any]],
     roles: list[Mapping[str, Any]],
     bot_member: Mapping[str, Any] | None = None,
+    application: Mapping[str, Any] | None = None,
 ) -> DiscordValidationResult:
     """Return blocking errors and non-blocking security findings."""
     errors: list[str] = []
@@ -301,6 +378,20 @@ def validate_discord_snapshot_report(
     actual_client_id = int(bot_user.get("id", 0) or 0)
     if configured_client_id and configured_client_id != actual_client_id:
         errors.append("Application ID does not match the configured bot token.")
+
+    if application is not None:
+        missing_intents = missing_privileged_intents(application)
+        if missing_intents:
+            portal_url = (
+                f"https://discord.com/developers/applications/{actual_client_id}/bot"
+                if actual_client_id
+                else "the Discord Developer Portal Bot page"
+            )
+            errors.append(
+                "Enable Project L's required Privileged Gateway Intents: "
+                f"{', '.join(missing_intents)}. Open {portal_url}, enable each "
+                "switch, save, and validate again."
+            )
 
     validated_channels: list[tuple[str, Mapping[str, Any]]] = []
     for label, raw_id, expected_types in _channel_specs(config):
@@ -350,9 +441,21 @@ def validate_discord_snapshot_report(
             config, bot_member, role_index
         )
         administrator = bool(base_permissions & PERMISSION_BITS["administrator"])
+        missing_base_permissions = [
+            (name, label)
+            for name, label, _feature in REQUIRED_BOT_PERMISSION_SPECS
+            if not administrator and not base_permissions & PERMISSION_BITS[name]
+        ]
         if administrator:
             warnings.append(
                 "The bot has Administrator permission; grant only the permissions it needs."
+            )
+        elif missing_base_permissions:
+            errors.append(
+                "The bot is missing required server permissions: "
+                + ", ".join(label for _name, label in missing_base_permissions)
+                + ". Reopen Invite Bot to Server in setup and approve every "
+                "requested permission."
             )
 
         guild_id = int(config.get("guildId", 0) or 0)
@@ -382,8 +485,15 @@ def validate_discord_snapshot_report(
             for label, role_id in configured_roles
             if role_id and label != "Streamer Role"
         ]
-        if assignable_roles and not (
-            administrator or base_permissions & PERMISSION_BITS["manage_roles"]
+        missing_base_permission_names = {
+            name for name, _label in missing_base_permissions
+        }
+        if (
+            assignable_roles
+            and "manage_roles" not in missing_base_permission_names
+            and not (
+                administrator or base_permissions & PERMISSION_BITS["manage_roles"]
+            )
         ):
             errors.append("The bot needs Manage Roles permission for configured roles.")
         for label, role_id in assignable_roles:
@@ -483,6 +593,7 @@ def validate_live_discord_report(
     if not clean_token or not guild_id:
         raise DiscordValidationError("A bot token and server ID are required.")
     bot_user = _get_json("users/@me", clean_token, timeout)
+    application = _get_json("oauth2/applications/@me", clean_token, timeout)
     channels = _get_json(f"guilds/{guild_id}/channels", clean_token, timeout)
     roles = _get_json(f"guilds/{guild_id}/roles", clean_token, timeout)
     if not isinstance(bot_user, Mapping) or not bot_user.get("id"):
@@ -496,6 +607,7 @@ def validate_live_discord_report(
         not isinstance(channels, list)
         or not isinstance(roles, list)
         or not isinstance(bot_member, Mapping)
+        or not isinstance(application, Mapping)
     ):
         raise DiscordValidationError(
             "Discord returned an unexpected validation response."
@@ -507,6 +619,7 @@ def validate_live_discord_report(
         channels=channels,
         roles=roles,
         bot_member=bot_member,
+        application=application,
     )
 
 

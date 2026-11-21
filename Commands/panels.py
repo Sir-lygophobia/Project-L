@@ -13,6 +13,12 @@ from logFunction import print_interaction_info
 
 
 SELF_ROLES_IMAGE = BASE_DIR / "Data" / "self_roles.gif"
+PANEL_ART_DIR = BASE_DIR / "Data" / "art"
+PANEL_ART_IMAGES = {
+    "verification": PANEL_ART_DIR / "verification.png",
+    "private_voice": PANEL_ART_DIR / "private_voice.png",
+    "tickets": PANEL_ART_DIR / "tickets.png",
+}
 SELF_ROLE_PANEL_TITLES = frozenset(
     {
         "color roles",
@@ -238,6 +244,28 @@ def ticket_embed(colour) -> discord.Embed:
     return embed
 
 
+async def send_panel_with_local_art(kind, channel, *, embed, view):
+    """Send a panel with its bundled art as a durable Discord attachment."""
+    art_path = PANEL_ART_IMAGES.get(kind)
+    image_file = None
+    if art_path is not None and art_path.is_file():
+        try:
+            filename = f"project_l_{kind}{art_path.suffix.casefold()}"
+            image_file = discord.File(art_path, filename=filename)
+            embed.set_image(url=f"attachment://{filename}")
+        except OSError as exc:
+            print(f"[!] Could not open local art for the {kind} panel: {exc}")
+
+    try:
+        send_options = {"embed": embed, "view": view}
+        if image_file is not None:
+            send_options["file"] = image_file
+        return await channel.send(**send_options)
+    finally:
+        if image_file is not None:
+            image_file.close()
+
+
 async def send_reaction_role_panel(channel, guild, colour):
     options = reaction_role_options(guild, load_role_ids())
     if not options:
@@ -264,15 +292,26 @@ async def send_reaction_role_panel(channel, guild, colour):
 
 async def send_managed_panel(kind: str, channel, guild, colour):
     if kind == "verification":
-        return await channel.send(
-            embed=verification_embed(guild, colour), view=VerificationView()
+        return await send_panel_with_local_art(
+            kind,
+            channel,
+            embed=verification_embed(guild, colour),
+            view=VerificationView(),
         )
     if kind == "private_voice":
-        return await channel.send(
-            embed=private_voice_embed(colour), view=PrivateVoiceView()
+        return await send_panel_with_local_art(
+            kind,
+            channel,
+            embed=private_voice_embed(colour),
+            view=PrivateVoiceView(),
         )
     if kind == "tickets":
-        return await channel.send(embed=ticket_embed(colour), view=TicketView())
+        return await send_panel_with_local_art(
+            kind,
+            channel,
+            embed=ticket_embed(colour),
+            view=TicketView(),
+        )
     if kind == "reaction_roles":
         return await send_reaction_role_panel(channel, guild, colour)
     raise ValueError(f"Unknown managed panel kind: {kind}")

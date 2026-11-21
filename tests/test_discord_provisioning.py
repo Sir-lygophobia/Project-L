@@ -14,6 +14,8 @@ from discord_provisioning import (
 )
 from discord_validation import PERMISSION_BITS
 
+ENABLED_PRIVILEGED_INTENT_FLAGS = (1 << 13) | (1 << 15) | (1 << 19)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_CONFIG = PROJECT_ROOT / "Data" / "config.example.json"
 
@@ -49,12 +51,15 @@ class FakeDiscordApi:
             },
         ]
         self.bot_member = {"roles": ["201"]}
+        self.application_flags = ENABLED_PRIVILEGED_INTENT_FLAGS
         self.calls = []
 
     def __call__(self, method, path, token, timeout, payload=None):
         self.calls.append((method, path, deepcopy(payload)))
         if method == "GET" and path == "users/@me":
             return {"id": str(self.bot_id), "username": "Project L"}
+        if method == "GET" and path == "oauth2/applications/@me":
+            return {"id": str(self.bot_id), "flags": self.application_flags}
         if method == "GET" and path == f"guilds/{self.guild_id}/channels":
             return deepcopy(self.channels)
         if method == "GET" and path == f"guilds/{self.guild_id}/roles":
@@ -254,8 +259,34 @@ class DiscordProvisioningTests(unittest.TestCase):
         self.assertIn("client_id=200", url)
         self.assertIn("scope=bot+applications.commands", url)
         self.assertIn(f"permissions={required_bot_permissions()}", url)
+        self.assertIn("integration_type=0", url)
         self.assertIn("guild_id=100", url)
         self.assertIn("disable_guild_select=true", url)
+
+    def test_invite_is_complete_without_administrator_or_manage_all_expressions(self):
+        permissions = required_bot_permissions()
+        self.assertFalse(permissions & PERMISSION_BITS["administrator"])
+        self.assertFalse(permissions & PERMISSION_BITS["manage_guild_expressions"])
+        self.assertTrue(permissions & PERMISSION_BITS["create_guild_expressions"])
+        self.assertTrue(permissions & PERMISSION_BITS["send_messages_in_threads"])
+
+    def test_privileged_intents_are_checked_before_server_changes(self):
+        self.api.application_flags = 0
+        with self.assertRaisesRegex(
+            DiscordProvisioningError,
+            "Presence Intent.*Server Members Intent.*Message Content Intent",
+        ):
+            validate_provisioning_access(
+                self.config,
+                token="token",
+                request_json=self.api,
+            )
+        self.assertFalse(
+            any(
+                method in {"POST", "PATCH", "PUT"}
+                for method, _path, _payload in self.api.calls
+            )
+        )
 
     def test_bot_user_id_can_be_discovered_before_guild_invitation(self):
         calls = []

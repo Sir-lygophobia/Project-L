@@ -12,28 +12,35 @@ creates an isolated `.venv`, installs every Python dependency, backs up existing
 databases, verifies all bot extensions, and opens a graphical configuration
 wizard.
 
-1. Create a bot in the Discord Developer Portal. On its bot page, enable these
-   privileged gateway intents:
-
-   - Presence Intent
-   - Server Members Intent
-   - Message Content Intent
-
-2. Open PowerShell in this project directory and run:
+1. Open PowerShell in this project directory and run:
 
    ```powershell
    .\setup.ps1
    ```
 
-3. In the setup window, enter the Discord bot token and server ID, then select
-   **Invite Bot to Server**. Discord opens an invite for that server with the
-   exact application-command scopes and permissions the enabled bot features
-   use. Authorize it, return to setup, and select **Save & Create**.
-4. Project L creates or reuses its verified and streamer roles, secured
+2. In the setup wizard, use **Open Developer Portal** to create an
+   application. Open its **Bot** page, create/add the bot if Discord offers that
+   option, then reset and copy its token. The Discord application and token
+   remain under your account; Project L never creates an account or asks you to
+   send the token anywhere.
+3. On the bot page, enable these privileged gateway intents and save the
+   changes:
+
+   - Presence Intent
+   - Server Members Intent
+   - Message Content Intent
+
+4. In the setup window, enter the Discord bot token and server ID, confirm the
+   three intent switches, then select **Invite Bot to Server**. Discord opens an
+   invite for that exact server with the application-command scopes and only
+   the permissions Project L uses. If needed, **Open This Bot's Settings**
+   resolves the Bot page directly from the entered token. Authorize the invite,
+   return to setup, choose **Check Readiness**, then **Save & Create**.
+5. Project L creates or reuses its verified and streamer roles, secured
    categories and channels, statistics counters, and setup-panel channel. It
    remembers all generated IDs automatically; no channel or category IDs are
    requested.
-5. Start the bot:
+6. Start the bot:
 
    ```powershell
    .\start.ps1
@@ -206,15 +213,38 @@ restart count and delay can be changed with `-MaxRestarts` and
 On first startup, Project L posts missing verification, private-voice, ticket,
 and configured reaction-role panels in the automatic `project-l-panels`
 channel. Existing panels are detected by their stable component IDs, so
-restarts do not post duplicates. New `/reactionroles` panels upload
-`Data/self_roles.gif` directly to Discord, so their embedded image does not
-expire. Images supplied to `/say` are also reuploaded as durable message
-attachments.
+restarts do not post duplicates. Verification, private-voice, and ticket panels
+upload their matching banner from `Data/art/` directly to Discord. New
+`/reactionroles` panels do the same with `Data/self_roles.gif`, so the embedded
+images do not depend on a third-party host and do not expire. Images supplied
+to `/say` are also reuploaded as durable message attachments.
 
 If older Color, Gender, Age, Platform, Server Notification, or Game role panels
 show **Image failed to load**, run `/repairselfroles` in that channel as an
 administrator. The command edits only recognized bot-authored panels, preserves
 their existing buttons and unrelated attachments, and is safe to run again.
+
+## Included art pack
+
+Project L includes local artwork for every setup-managed visual:
+
+- `Data/art/project_l_logo.png`: square bot/application avatar and server icon.
+- `Data/art/project_l_server_banner.png`: 16:9 Discord server banner.
+- `Data/art/verification.png`, `private_voice.png`, and `tickets.png`: durable
+  setup-panel banners uploaded automatically with their embeds.
+- `Data/art/emojis/`: five transparent feature emojis. Setup creates only
+  missing `projectl_*` names and never replaces or deletes server emojis.
+- `Data/welcome.jpg`: background used to generate personalized welcome cards.
+- `Data/self_roles.gif`: animated reaction-role panel banner and legacy-panel
+  repair source.
+
+The setup-managed panel art is automatic. Discord deliberately keeps bot
+application branding and server branding behind account/server-owner controls,
+so upload the included logo and banner in the Developer Portal or **Server
+Settings > Overview**. Exact dimensions and usage notes are in
+`Data/art/README.md`. Missing optional panel artwork never prevents the panel
+buttons from working; the bot falls back to a text-only embed. Emoji slot,
+permission, or file problems are non-blocking setup warnings.
 
 ## Data and privacy
 

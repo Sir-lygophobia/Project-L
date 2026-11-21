@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import webbrowser
+from pathlib import Path
 
 from config_loader import ConfigError, load_role_ids
 from discord_provisioning import (
@@ -29,6 +30,22 @@ from setup_config import (
 )
 
 DISCORD_APPLICATIONS_URL = "https://discord.com/developers/applications"
+ART_DIR = Path(__file__).resolve().parent / "Data" / "art"
+REQUIRED_GATEWAY_INTENTS = (
+    "Presence Intent",
+    "Server Members Intent",
+    "Message Content Intent",
+)
+
+
+def build_bot_settings_url(client_id: int) -> str:
+    """Return the Developer Portal Bot page for a validated bot account."""
+    return f"{DISCORD_APPLICATIONS_URL}/{int(client_id)}/bot"
+
+
+def required_gateway_intents_text() -> str:
+    """Return the human-readable privileged intent checklist."""
+    return ", ".join(REQUIRED_GATEWAY_INTENTS)
 
 
 def format_validation_warnings(warnings: list[str]) -> str:
@@ -84,6 +101,7 @@ class ProjectLSetupWizard:
         self.variables: dict[str, object] = {}
         self.text_widgets: dict[str, object] = {}
         self.secret_entries: list[object] = []
+        self.image_refs: list[object] = []
         self.startup_warnings: list[str] = []
 
         self.base_config = self._load_config_for_editing()
@@ -191,6 +209,7 @@ class ProjectLSetupWizard:
             ("tickets", "3. Automatic Setup"),
             ("stats", "4. Server Stats"),
             ("integrations", "5. Integrations"),
+            ("branding", "6. Art & Branding"),
         ):
             tab = ScrollableTab(self.notebook, self.tk, self.ttk)
             self.notebook.add(tab.outer, text=title)
@@ -201,6 +220,7 @@ class ProjectLSetupWizard:
         self._build_tickets_tab()
         self._build_stats_tab()
         self._build_integrations_tab()
+        self._build_branding_tab()
 
         footer = self.tk.Frame(self.root, background="#ffffff", padx=18, pady=12)
         footer.pack(fill="x", side="bottom")
@@ -221,7 +241,9 @@ class ProjectLSetupWizard:
         self.ttk.Button(footer, text="Cancel", command=self.cancel).grid(
             row=1, column=1, padx=(8, 0)
         )
-        self.ttk.Button(footer, text="Validate", command=self.validate_only).grid(
+        self.ttk.Button(
+            footer, text="Check Readiness", command=self.validate_only
+        ).grid(
             row=1, column=2, padx=(8, 0)
         )
         self.ttk.Button(
@@ -320,6 +342,74 @@ class ProjectLSetupWizard:
     def _build_core_tab(self):
         self._section(
             "core",
+            "First-time Discord setup",
+            (
+                "1. Open the Developer Portal and create an application. On its Bot "
+                "page, create/add the bot if Discord offers that option.\n"
+                f"2. Under Privileged Gateway Intents, enable "
+                f"{required_gateway_intents_text()}, then save.\n"
+                "3. Reset/copy the bot token and paste it below. Never share or commit it.\n"
+                "4. In Discord, enable User Settings → Advanced → Developer Mode, "
+                "then right-click your server and copy its Server ID.\n"
+                "5. Invite the bot, authorize it, then use Check Readiness and Save & Create."
+            ),
+        )
+        onboarding_controls = self.ttk.Frame(
+            self.tabs["core"].content, style="Page.TFrame"
+        )
+        onboarding_controls.grid(
+            row=self.tabs["core"].content.grid_size()[1],
+            column=0,
+            sticky="w",
+            pady=(0, 8),
+        )
+        self.ttk.Button(
+            onboarding_controls,
+            text="1. Open Developer Portal",
+            command=lambda: webbrowser.open(DISCORD_APPLICATIONS_URL),
+        ).grid(row=0, column=0, sticky="w")
+        self.ttk.Button(
+            onboarding_controls,
+            text="Open This Bot's Settings (after token)",
+            command=self.open_bot_settings,
+        ).grid(row=0, column=1, sticky="w", padx=(10, 0))
+
+        intents_confirmed = self.tk.BooleanVar(
+            value=bool(self.initial_values.get("client_id", 0))
+        )
+        self.gateway_intents_confirmed = intents_confirmed
+        self.ttk.Checkbutton(
+            self.tabs["core"].content,
+            text=(
+                "I enabled Presence, Server Members, and Message Content intents "
+                "on this bot's Bot page."
+            ),
+            variable=intents_confirmed,
+        ).grid(
+            row=self.tabs["core"].content.grid_size()[1],
+            column=0,
+            sticky="w",
+            pady=(0, 14),
+        )
+        self.ttk.Label(
+            self.tabs["core"].content,
+            text=(
+                "Discord does not allow a bot to turn these switches on for you. "
+                "Project L asks you to confirm them and verifies their status during "
+                "the readiness check."
+            ),
+            style="Help.TLabel",
+            wraplength=760,
+            justify="left",
+        ).grid(
+            row=self.tabs["core"].content.grid_size()[1],
+            column=0,
+            sticky="w",
+            pady=(0, 14),
+        )
+
+        self._section(
+            "core",
             "Discord connection",
             "Only the token and server ID are required to start. The token is stored only in the local, Git-ignored config file unless DISCORD_BOT_TOKEN is already set.",
         )
@@ -352,11 +442,6 @@ class ProjectLSetupWizard:
             variable=show_secrets,
             command=lambda: self._toggle_secrets(show_secrets.get()),
         ).pack(side="left")
-        self.ttk.Button(
-            controls,
-            text="Open Discord Developer Portal",
-            command=lambda: webbrowser.open(DISCORD_APPLICATIONS_URL),
-        ).pack(side="left", padx=(14, 0))
         self.ttk.Button(
             controls,
             text="Invite Bot to Server",
@@ -552,6 +637,98 @@ class ProjectLSetupWizard:
             height=6,
         )
 
+    def _build_branding_tab(self):
+        self._section(
+            "branding",
+            "Included Project L art pack",
+            (
+                "Panel banners and five projectl_* server emojis install automatically. "
+                "Setup only creates missing emoji names; it never replaces or deletes "
+                "your existing server emojis."
+            ),
+        )
+
+        preview_frame = self.ttk.Frame(
+            self.tabs["branding"].content, style="Page.TFrame"
+        )
+        preview_frame.grid(
+            row=self.tabs["branding"].content.grid_size()[1],
+            column=0,
+            sticky="ew",
+            pady=(2, 12),
+        )
+        preview_frame.columnconfigure(1, weight=1)
+        previews = (
+            ("Project L logo", ART_DIR / "project_l_logo.png", 4),
+            ("Server banner", ART_DIR / "project_l_server_banner.png", 5),
+        )
+        for row, (label, image_path, subsample) in enumerate(previews):
+            self.ttk.Label(
+                preview_frame, text=label, style="Field.TLabel", width=18
+            ).grid(row=row, column=0, sticky="nw", padx=(0, 14), pady=(3, 12))
+            try:
+                image = self.tk.PhotoImage(file=str(image_path)).subsample(subsample)
+                self.image_refs.append(image)
+                self.tk.Label(
+                    preview_frame,
+                    image=image,
+                    background="#0a0d0b",
+                    borderwidth=1,
+                    relief="solid",
+                ).grid(row=row, column=1, sticky="w", pady=(3, 12))
+            except self.tk.TclError:
+                self.ttk.Label(
+                    preview_frame,
+                    text=f"Missing: {image_path.name}",
+                    style="Help.TLabel",
+                ).grid(row=row, column=1, sticky="w", pady=(3, 12))
+
+        self._section(
+            "branding",
+            "Bot and server branding",
+            (
+                "Discord keeps application and server branding under owner control. "
+                "Use the buttons below to open the included files and the correct "
+                "Discord pages. Upload project_l_logo.png as the bot/server icon and "
+                "project_l_server_banner.png as the server banner. Project L will not "
+                "overwrite branding already chosen by the server owner."
+            ),
+        )
+        controls = self.ttk.Frame(
+            self.tabs["branding"].content, style="Page.TFrame"
+        )
+        controls.grid(
+            row=self.tabs["branding"].content.grid_size()[1],
+            column=0,
+            sticky="w",
+            pady=(2, 12),
+        )
+        self.ttk.Button(
+            controls,
+            text="Open Included Art Folder",
+            command=self.open_art_folder,
+        ).pack(side="left")
+        self.ttk.Button(
+            controls,
+            text="Open Bot Branding Page",
+            command=self.open_bot_settings,
+        ).pack(side="left", padx=(10, 0))
+        self.ttk.Button(
+            controls,
+            text="Open Server in Discord",
+            command=self.open_server_in_discord,
+        ).pack(side="left", padx=(10, 0))
+
+        self._section(
+            "branding",
+            "What setup applies automatically",
+            (
+                "Verification, ticket, private-voice, reaction-role, and personalized "
+                "welcome artwork is attached directly to Discord messages. No external "
+                "image host is required, and missing optional art never disables a button."
+            ),
+        )
+
     def _toggle_secrets(self, show: bool):
         for entry in self.secret_entries:
             entry.configure(show="" if show else "•")
@@ -564,6 +741,82 @@ class ProjectLSetupWizard:
             values[key] = widget.get("1.0", "end").strip()
         return values
 
+    def _effective_token(self) -> str:
+        """Return the entered token or the local environment override."""
+        return (
+            self.variables["token"].get().strip()
+            or os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+        )
+
+    def open_bot_settings(self):
+        """Open the exact Developer Portal Bot page resolved from the token."""
+        try:
+            self.set_status("Checking the token and locating this bot's settings...")
+            self.root.update_idletasks()
+            client_id = discover_bot_user_id(self._effective_token())
+        except (DiscordProvisioningError, ValueError) as exc:
+            self.set_status("Enter a valid bot token first.", error=True)
+            self.messagebox.showerror(
+                "Could not locate bot settings", str(exc), parent=self.root
+            )
+            return
+
+        url = build_bot_settings_url(client_id)
+        if not webbrowser.open(url):
+            self.set_status("The Developer Portal could not be opened.", error=True)
+            self.messagebox.showerror(
+                "Could not open Discord",
+                "Copy and open this URL in your browser:\n\n" + url,
+                parent=self.root,
+            )
+            return
+        self.set_status(
+            "Opened this bot's settings. Enable all three privileged intents.",
+            success=True,
+        )
+
+    def open_art_folder(self):
+        """Open the bundled art folder without changing Discord branding."""
+        try:
+            startfile = getattr(os, "startfile", None)
+            if startfile is not None:
+                startfile(str(ART_DIR))
+            elif not webbrowser.open(ART_DIR.resolve().as_uri()):
+                raise OSError("No file browser accepted the art folder.")
+        except OSError as exc:
+            self.set_status("The included art folder could not be opened.", error=True)
+            self.messagebox.showerror(
+                "Could not open art folder", str(exc), parent=self.root
+            )
+            return
+        self.set_status("Opened the included Project L art pack.", success=True)
+
+    def open_server_in_discord(self):
+        """Open the configured server so its owner can apply optional branding."""
+        try:
+            guild_id = parse_discord_id(
+                self.variables["guildId"].get(), "Discord server ID", required=True
+            )
+        except ConfigError as exc:
+            self.set_status("Enter a valid Discord server ID first.", error=True)
+            self.messagebox.showerror(
+                "Could not open server", str(exc), parent=self.root
+            )
+            return
+        url = f"https://discord.com/channels/{guild_id}"
+        if not webbrowser.open(url):
+            self.set_status("Discord could not be opened.", error=True)
+            self.messagebox.showerror(
+                "Could not open Discord",
+                "Copy and open this URL in your browser:\n\n" + url,
+                parent=self.root,
+            )
+            return
+        self.set_status(
+            "Opened the server. Use Server Settings → Overview for its icon and banner.",
+            success=True,
+        )
+
     def open_bot_invite(self):
         """Open an exact, guild-scoped Discord OAuth invite for this bot."""
         try:
@@ -572,10 +825,7 @@ class ProjectLSetupWizard:
                 "Discord server ID",
                 required=True,
             )
-            token = (
-                self.variables["token"].get().strip()
-                or os.environ.get("DISCORD_BOT_TOKEN", "").strip()
-            )
+            token = self._effective_token()
             self.set_status("Checking the bot token and preparing its invite...")
             self.root.update_idletasks()
             client_id = discover_bot_user_id(token)
@@ -600,6 +850,11 @@ class ProjectLSetupWizard:
         )
 
     def validated_values(self):
+        if not self.gateway_intents_confirmed.get():
+            raise ConfigError(
+                f"Confirm that {required_gateway_intents_text()} are enabled on "
+                "the bot's Developer Portal Bot page."
+            )
         return build_configuration(
             self.collect_values(),
             self.base_config,
@@ -637,7 +892,13 @@ class ProjectLSetupWizard:
         )
         if report.errors:
             raise ConfigError("\n".join(f"• {error}" for error in report.errors))
-        return config, role_ids, report.warnings, provisioning_report
+        warnings = list(report.warnings)
+        if provisioning_report is not None:
+            warnings.extend(
+                f"Optional art: {warning}"
+                for warning in provisioning_report.warnings
+            )
+        return config, role_ids, warnings, provisioning_report
 
     def validate_only(self):
         try:

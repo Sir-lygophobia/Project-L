@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -11,6 +13,7 @@ from Commands.panels import (
     panel_kind_for_message,
     reaction_role_options,
     repair_self_role_panel_images,
+    send_panel_with_local_art,
     ticket_embed,
     verification_embed,
 )
@@ -145,6 +148,58 @@ class PanelRepairTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AutomaticPanelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_local_panel_art_is_uploaded_as_a_message_attachment(self):
+        sent = {}
+
+        class Channel:
+            async def send(self, **kwargs):
+                sent.update(kwargs)
+                return SimpleNamespace()
+
+        with TemporaryDirectory() as temp_dir:
+            art_path = Path(temp_dir) / "verification.png"
+            art_path.write_bytes(b"test image contents")
+            with patch.dict(
+                "Commands.panels.PANEL_ART_IMAGES",
+                {"verification": art_path},
+                clear=False,
+            ):
+                await send_panel_with_local_art(
+                    "verification",
+                    Channel(),
+                    embed=discord.Embed(title="Verify"),
+                    view=object(),
+                )
+
+        self.assertEqual(
+            sent["embed"].image.url,
+            "attachment://project_l_verification.png",
+        )
+        self.assertEqual(sent["file"].filename, "project_l_verification.png")
+
+    async def test_missing_local_panel_art_uses_text_only_embed(self):
+        sent = {}
+
+        class Channel:
+            async def send(self, **kwargs):
+                sent.update(kwargs)
+                return SimpleNamespace()
+
+        with patch.dict(
+            "Commands.panels.PANEL_ART_IMAGES",
+            {"tickets": Path("does-not-exist.png")},
+            clear=False,
+        ):
+            await send_panel_with_local_art(
+                "tickets",
+                Channel(),
+                embed=discord.Embed(title="Tickets"),
+                view=object(),
+            )
+
+        self.assertNotIn("file", sent)
+        self.assertFalse(sent["embed"].image.url)
+
     async def test_panel_installation_is_idempotent(self):
         bot_user = SimpleNamespace(id=42)
 
