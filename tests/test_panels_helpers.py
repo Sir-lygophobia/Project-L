@@ -12,6 +12,7 @@ from Commands.panels import (
     normalized_panel_title,
     panel_kind_for_message,
     reaction_role_options,
+    repair_managed_panel_art,
     repair_self_role_panel_images,
     send_panel_with_local_art,
     ticket_embed,
@@ -148,6 +149,34 @@ class PanelRepairTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AutomaticPanelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_existing_text_only_panel_is_upgraded_in_place(self):
+        message = SimpleNamespace(
+            embeds=[discord.Embed(title="Verify")],
+            attachments=[],
+            edit=AsyncMock(),
+        )
+        with TemporaryDirectory() as temp_dir:
+            art_path = Path(temp_dir) / "verification.png"
+            art_path.write_bytes(b"test image contents")
+            with patch.dict(
+                "Commands.panels.PANEL_ART_IMAGES",
+                {"verification": art_path},
+                clear=False,
+            ):
+                updated = await repair_managed_panel_art(message, "verification")
+
+        self.assertTrue(updated)
+        message.edit.assert_awaited_once()
+        edited = message.edit.await_args.kwargs
+        self.assertEqual(
+            edited["embed"].image.url,
+            "attachment://project_l_verification.png",
+        )
+        self.assertEqual(
+            edited["attachments"][-1].filename,
+            "project_l_verification.png",
+        )
+
     async def test_local_panel_art_is_uploaded_as_a_message_attachment(self):
         sent = {}
 
@@ -215,10 +244,16 @@ class AutomaticPanelTests(unittest.IsolatedAsyncioTestCase):
                 return iterate()
 
             async def send(self, *, embed, view, **_kwargs):
+                image_file = _kwargs.get("file")
                 message = SimpleNamespace(
                     author=bot_user,
                     embeds=[embed],
                     components=[SimpleNamespace(children=view.children)],
+                    attachments=(
+                        [SimpleNamespace(filename=image_file.filename)]
+                        if image_file is not None
+                        else []
+                    ),
                 )
                 self.messages.append(message)
                 return message

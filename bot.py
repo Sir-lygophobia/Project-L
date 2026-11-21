@@ -348,6 +348,8 @@ async def on_ready():
         panel_report = await ensure_automatic_panels(client)
         if panel_report.created:
             print("[OK] Installed panels: " + ", ".join(panel_report.created))
+        if panel_report.updated:
+            print("[OK] Updated panel art: " + ", ".join(panel_report.updated))
         if panel_report.failed:
             print("[!] Panel setup needs attention: " + "; ".join(panel_report.failed))
         client.panels_reconciled = not panel_report.failed

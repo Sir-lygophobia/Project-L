@@ -213,8 +213,10 @@ restart count and delay can be changed with `-MaxRestarts` and
 On first startup, Project L posts missing verification, private-voice, ticket,
 and configured reaction-role panels in the automatic `project-l-panels`
 channel. Existing panels are detected by their stable component IDs, so
-restarts do not post duplicates. Verification, private-voice, and ticket panels
-upload their matching banner from `Data/art/` directly to Discord. New
+restarts do not post duplicates. Existing text-only managed panels are upgraded
+in place with their local art while preserving their buttons. Verification,
+private-voice, and ticket panels upload their matching banner from `Data/art/`
+directly to Discord. New
 `/reactionroles` panels do the same with `Data/self_roles.gif`, so the embedded
 images do not depend on a third-party host and do not expire. Images supplied
 to `/say` are also reuploaded as durable message attachments.

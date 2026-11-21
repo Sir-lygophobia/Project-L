@@ -114,6 +114,65 @@ def _component_custom_ids(message) -> set[str]:
     return result
 
 
+def _managed_panel_art_filename(kind: str) -> str | None:
+    art_path = PANEL_ART_IMAGES.get(kind)
+    if art_path is None:
+        return None
+    return f"project_l_{kind}{art_path.suffix.casefold()}"
+
+
+def managed_panel_art_is_current(message, kind: str) -> bool:
+    """Return whether a managed panel uses its durable bundled attachment."""
+    filename = _managed_panel_art_filename(kind)
+    art_path = PANEL_ART_IMAGES.get(kind)
+    if filename is None or art_path is None or not art_path.is_file():
+        return True
+    attachments = getattr(message, "attachments", [])
+    if not any(
+        str(getattr(attachment, "filename", "")).casefold()
+        == filename.casefold()
+        for attachment in attachments
+    ):
+        return False
+    embeds = getattr(message, "embeds", [])
+    if not embeds:
+        return False
+    image_url = str(getattr(embeds[0].image, "url", "") or "")
+    return filename.casefold() in image_url.casefold()
+
+
+async def repair_managed_panel_art(message, kind: str) -> bool:
+    """Attach bundled art to an existing panel without replacing its controls."""
+    art_path = PANEL_ART_IMAGES.get(kind)
+    filename = _managed_panel_art_filename(kind)
+    embeds = getattr(message, "embeds", [])
+    if (
+        art_path is None
+        or filename is None
+        or not art_path.is_file()
+        or not embeds
+        or managed_panel_art_is_current(message, kind)
+    ):
+        return False
+
+    image_file = None
+    try:
+        image_file = discord.File(art_path, filename=filename)
+        embed = discord.Embed.from_dict(embeds[0].to_dict())
+        embed.set_image(url=f"attachment://{filename}")
+        preserved = [
+            attachment
+            for attachment in getattr(message, "attachments", [])
+            if str(getattr(attachment, "filename", "")).casefold()
+            != filename.casefold()
+        ]
+        await message.edit(embed=embed, attachments=[*preserved, image_file])
+        return True
+    finally:
+        if image_file is not None:
+            image_file.close()
+
+
 def panel_kind_for_message(message, bot_user_id: int) -> str | None:
     """Identify a bot-authored managed panel by its stable component IDs."""
     if getattr(getattr(message, "author", None), "id", None) != bot_user_id:
@@ -321,6 +380,7 @@ async def send_managed_panel(kind: str, channel, guild, colour):
 class PanelInstallReport:
     created: list[str] = field(default_factory=list)
     existing: list[str] = field(default_factory=list)
+    updated: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
 
 
@@ -341,12 +401,12 @@ async def ensure_automatic_panels(client) -> PanelInstallReport:
             report.failed.append(f"panels channel is unavailable: {exc}")
             return report
 
-    existing = set()
+    existing_messages = {}
     try:
         async for message in channel.history(limit=100, oldest_first=False):
             kind = panel_kind_for_message(message, client.user.id)
-            if kind:
-                existing.add(kind)
+            if kind and kind not in existing_messages:
+                existing_messages[kind] = message
     except (discord.Forbidden, discord.HTTPException) as exc:
         report.failed.append(f"could not inspect existing panels: {exc}")
         return report
@@ -355,8 +415,21 @@ async def ensure_automatic_panels(client) -> PanelInstallReport:
     if reaction_role_options(guild, load_role_ids()):
         desired.append("reaction_roles")
     for kind in desired:
-        if kind in existing:
-            report.existing.append(kind)
+        existing_message = existing_messages.get(kind)
+        if existing_message is not None:
+            try:
+                if await repair_managed_panel_art(existing_message, kind):
+                    report.updated.append(kind)
+                else:
+                    report.existing.append(kind)
+            except (
+                OSError,
+                discord.Forbidden,
+                discord.NotFound,
+                discord.HTTPException,
+            ) as exc:
+                print(f"[!] Could not update {kind} panel art: {exc}")
+                report.failed.append(kind)
             continue
         try:
             await send_managed_panel(kind, channel, guild, client.colour)
